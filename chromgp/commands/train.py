@@ -47,19 +47,26 @@ def _init_groupsZ(Z: torch.Tensor, X: torch.Tensor, C: torch.Tensor) -> torch.Te
 def build_model_svgp(config: Config, X: torch.Tensor = None) -> nn.Module:
     """ChromGP(SVGP) with batched (L,M) variational parameters."""
     from gpzoo.gp import SVGP
-    from gpzoo.kernels import batched_RBF
+    from gpzoo.kernels import batched_RBF, batched_Matern32
     from gpzoo.modules import CholeskyParameter
 
     L = config.model.get("n_components", 3)
     M = config.model.get("num_inducing", 800)
     jitter = float(config.model.get("jitter", 1e-5))
     noise = float(config.model.get("noise", 0.1))
-    ls = float(config.model.get("lengthscale", 8.0))
+    ls = float(config.model.get("lengthscale", 5e6))
     out_ls = float(config.model.get("output_lengthscale", 1.0))
     sigma = float(config.model.get("sigma", 1.0))
     cholesky_mode = config.model.get("cholesky_mode", "exp")
 
-    svgp_kernel = batched_RBF(sigma=sigma, lengthscale=ls)
+    # Input kernel on 1D genomic coordinates — Matern32 is default (SF convention)
+    kernel_name = config.model.get("kernel", "Matern32").lower()
+    if kernel_name == "matern32":
+        svgp_kernel = batched_Matern32(sigma=sigma, lengthscale=ls)
+    elif kernel_name == "rbf":
+        svgp_kernel = batched_RBF(sigma=sigma, lengthscale=ls)
+    else:
+        raise ValueError(f"Unknown kernel: {kernel_name}")
     gp = SVGP(svgp_kernel, dim=1, M=M, jitter=jitter,
                cholesky_mode=cholesky_mode, diagonal_only=False)
 
@@ -103,24 +110,33 @@ def build_model_mggp_svgp(
         n_groups: Number of unique ChromHMM groups G.
     """
     from gpzoo.gp import MGGP_SVGP
-    from gpzoo.kernels import batched_MGGP_RBF, batched_RBF
+    from gpzoo.kernels import batched_MGGP_RBF, batched_MGGP_Matern32, batched_RBF
     from gpzoo.modules import CholeskyParameter
 
     L = config.model.get("n_components", 3)
     M = config.model.get("num_inducing", 800)
     jitter = float(config.model.get("jitter", 1e-5))
     noise = float(config.model.get("noise", 0.1))
-    ls = float(config.model.get("lengthscale", 8.0))
+    ls = float(config.model.get("lengthscale", 5e6))
     out_ls = float(config.model.get("output_lengthscale", 1.0))
     sigma = float(config.model.get("sigma", 1.0))
     cholesky_mode = config.model.get("cholesky_mode", "exp")
     group_diff_param = float(config.model.get("group_diff_param", 1.0))
 
-    # MGGP kernel: same as RBF but covariance modulated by group distance
-    mggp_kernel = batched_MGGP_RBF(
-        sigma=sigma, lengthscale=ls,
-        group_diff_param=group_diff_param, n_groups=n_groups,
-    )
+    # Input kernel on 1D genomic coordinates — Matern32 is default (SF convention)
+    kernel_name = config.model.get("kernel", "Matern32").lower()
+    if kernel_name == "matern32":
+        mggp_kernel = batched_MGGP_Matern32(
+            sigma=sigma, lengthscale=ls,
+            group_diff_param=group_diff_param, n_groups=n_groups,
+        )
+    elif kernel_name == "rbf":
+        mggp_kernel = batched_MGGP_RBF(
+            sigma=sigma, lengthscale=ls,
+            group_diff_param=group_diff_param, n_groups=n_groups,
+        )
+    else:
+        raise ValueError(f"Unknown kernel: {kernel_name}")
 
     gp = MGGP_SVGP(
         mggp_kernel, dim=1, M=M, jitter=jitter,
@@ -174,11 +190,12 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     # --- Paths ---
     region_slug = config.preprocessing.get("region", "unknown").replace(":", "_")
     model_name = config.model_name
-    output_dir = Path(config.output_dir) / region_slug / model_name
+    region_dir = Path(config.output_dir) / region_slug
+    output_dir = region_dir / model_name          # model-specific outputs
     save_dir = output_dir / "checkpoints"
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    data = load_preprocessed(output_dir)
+    data = load_preprocessed(region_dir)          # shared preprocessed dir
     N = data.n_bins
     D = data.n_features
     print(f"Data: {data}")
@@ -245,7 +262,17 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     # --- Resume from checkpoint ---
     start_step = 0
     losses = []
-    Zs = []
+    # --- Track variational parameters for trajectory ---
+    # Save only mu (L, M) + lengthscale at each checkpoint step.
+    # The posterior mean q(f*|X) depends only on mu and the kernel,
+    # not on Lu, so we can reconstruct full (N, L) positions at figure
+    # time without storing the 7 MB Lu Cholesky per snapshot.
+    L = config.model.get("n_components", 3)
+    M = config.model.get("num_inducing", 800)
+    train_ls = config.model.get("train_lengthscale", False)
+    Z_mus = []       # (n_snapshots, L, M)  — variational mean at inducing points
+    Z_lengthscales = []  # (n_snapshots,)  — input lengthscale (if trainable)
+    Z_steps = []       # (n_snapshots,)  — iteration number
     checkpoint_path = save_dir / "model_final.pt"
 
     if resume:
@@ -318,18 +345,26 @@ def run(config_path: str, resume: bool = False, video: bool = False):
         if scale_kl_nm:
             L2 = L2 * N / M
 
-        loss = -(L1 - L2)
+        elbo = L1 - L2
+        loss = -elbo
         loss.backward()
         optimizer.step()
         scheduler.step()
 
-        losses.append(loss.item())
+        losses.append(elbo.item())
 
+        # Save variational parameters at checkpoint steps.
+        # Only mu (L, M) and lengthscale — the posterior mean q(f*|X)
+        # depends on mu + kernel, not on Lu. Full (N, L) positions are
+        # reconstructed at figure time via model.gp(X).
         if step % 100 == 0 or step == total_steps - 1:
-            Zs.append(qZ.mean.T.detach().cpu().clone().numpy())
+            Z_mus.append(model.gp.mu.detach().cpu().clone().numpy())
+            if train_ls:
+                Z_lengthscales.append(model.gp.kernel.lengthscale.item())
+            Z_steps.append(step)
 
         current_lr = scheduler.get_last_lr()[0]
-        pbar.set_postfix({"Loss": f"{loss.item():.3f}", "lr": f"{current_lr:.1e}"})
+        pbar.set_postfix({"ELBO": f"{elbo.item():.3f}", "lr": f"{current_lr:.1e}"})
 
     train_time = time.perf_counter() - t0
 
@@ -346,7 +381,14 @@ def run(config_path: str, resume: bool = False, video: bool = False):
         "train_time": train_time,
     }
     torch.save(checkpoint, checkpoint_path)
-    np.save(save_dir / "trajectory.npy", np.array(Zs, dtype=object))
+    # Save trajectory as compact mu + optional lengthscale (not full N×L positions)
+    traj_data = {
+        "mu": np.stack(Z_mus),          # (n_snapshots, L, M)
+        "steps": np.array(Z_steps),      # (n_snapshots,)
+    }
+    if train_ls:
+        traj_data["lengthscale"] = np.array(Z_lengthscales)  # (n_snapshots,)
+    np.savez(save_dir / "trajectory.npz", **traj_data)
 
     # --- Save ELBO history (SF convention) ---
     df = pd.DataFrame({"iteration": range(len(losses)), "elbo": losses})

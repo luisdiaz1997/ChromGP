@@ -88,10 +88,9 @@ def run(config_path: str):
     print(f"  After NaN filter: {data.n_bins} bins")
 
     # Create output directory for preprocessed data
-    # Output path: outputs/<dataset>/<region_slug>/<model>/preprocessed/
-    model_name = config.model_name
+    # Output path: outputs/<dataset>/<region_slug>/preprocessed/  (shared across models)
     region_slug = config.preprocessing.get('region', 'unknown').replace(':', '_')
-    output_dir = Path(config.output_dir) / region_slug / model_name / "preprocessed"
+    output_dir = Path(config.output_dir) / region_slug / "preprocessed"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Save arrays in standardized format
