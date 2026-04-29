@@ -10,7 +10,7 @@ ChromGP is a research codebase for inferring 3D chromatin structure from Hi-C-st
 
 - Editable install: `pip install -e .` from the repo root. `setup.py` declares no dependencies — they come transitively from GPzoo, which must also be installed (typically `pip install -e .` in `../GPzoo`).
 - Runtime imports rely on `torch`, `numpy`, `matplotlib`, `plotly`, `tqdm`, and `gpzoo.{gp,kernels,utilities}`. There is no requirements.txt and no test/lint/build configuration.
-- Notebooks expect data files under `notebooks/`: `hg38.fa` / `hg38.fa.fai` (reference genome), `hg38_gc_cov_15kb.tsv`, and `.mcool` files reachable via the `mcools/` symlink (points to `/gladstone/engelhardt/lab/lchumpitaz/mcools`).
+- Notebooks expect data files via symlinks into `/gladstone/engelhardt/lab/lchumpitaz/hi-c/`: `notebooks/hg38.fa` and `notebooks/hg38.fa.fai` (reference genome) and the repo-root `mcools/` symlink (`.mcool` Hi-C files). `notebooks/hg38_gc_cov_15kb.tsv` lives directly in the repo.
 
 ## Architecture
 
