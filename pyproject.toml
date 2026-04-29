@@ -45,8 +45,13 @@ dependencies = [
     "cooltools>=0.7.0",
     "jupyter>=1.0.0",
     "ipykernel>=6.0.0",
+    "click>=8.0",
+    "pyyaml>=6.0",
     # Note: gpzoo and bioframe installed separately as editable from sibling repos
 ]
+
+[project.scripts]
+chromgp = "chromgp.cli:cli"
 
 [project.optional-dependencies]
 dev = [
