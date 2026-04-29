@@ -221,6 +221,84 @@ def create_training_animation(
 
 
 # ---------------------------------------------------------------------------
+# Groupwise conditional 3D positions — one panel per ChromHMM group
+# ---------------------------------------------------------------------------
+
+def plot_groupwise_coordinates(
+    Z_uncond: np.ndarray,
+    groupwise_positions: dict,
+    C: np.ndarray,
+    group_names: list,
+    output_path: Path,
+    panel_size: float = 3.5,
+) -> None:
+    """Grid of 3D chromatin structures: unconditional + one per ChromHMM group.
+
+    Each panel shows the full chromosome curve (bins connected in genomic order)
+    colored by actual ChromHMM group membership. The unconditional panel uses
+    the real group labels; conditional panels show the hypothetical structure
+    if all bins had that group's kernel.
+
+    Args:
+        Z_uncond: (N, 3) unconditional posterior mean positions.
+        groupwise_positions: {g: (N, 3)} conditional posterior per group.
+        C: (N,) integer group labels for coloring.
+        group_names: List of G group name strings.
+        output_path: Where to save the figure.
+        panel_size: Size of each subplot panel in inches.
+    """
+    n_groups = len(groupwise_positions)
+    n_panels = 1 + n_groups  # unconditional + one per group
+
+    # Lay out in a roughly square grid
+    ncols = min(4, n_panels)
+    nrows = int(np.ceil(n_panels / ncols))
+
+    fig = plt.figure(figsize=(panel_size * ncols, panel_size * nrows))
+
+    bin_colors = _get_group_colors(C)  # (N,) hex strings by actual group
+
+    def _draw_panel(ax, Z, title):
+        N = Z.shape[0]
+        # Draw the chromosome as a thin curve
+        ax.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.5, zorder=1)
+        # Scatter bins colored by actual ChromHMM state
+        ax.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=1.5,
+                   alpha=0.8, edgecolors="none", zorder=2)
+        ax.set_title(title, fontsize=7, pad=2)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_zticks([])
+        ax.view_init(elev=20, azim=-100)
+
+    # Panel 0: unconditional
+    ax0 = fig.add_subplot(nrows, ncols, 1, projection="3d")
+    _draw_panel(ax0, Z_uncond, "Unconditional")
+
+    # Panels 1..G: conditional per group
+    for g, Z_g in sorted(groupwise_positions.items()):
+        ax = fig.add_subplot(nrows, ncols, g + 2, projection="3d")
+        gname = group_names[g] if group_names and g < len(group_names) else f"Group {g}"
+        _draw_panel(ax, Z_g, gname)
+
+    # Legend: one colored dot per group
+    legend_elements = [
+        plt.Line2D([0], [0], marker="o", color="w",
+                   markerfacecolor=_STATE_COLORS[g % len(_STATE_COLORS)],
+                   markersize=5, label=group_names[g] if group_names else f"Group {g}")
+        for g in range(min(n_groups, len(_STATE_COLORS)))
+    ]
+    fig.legend(handles=legend_elements, loc="lower right",
+               fontsize=6, ncol=2, framealpha=0.8)
+
+    fig.suptitle("Groupwise Conditional 3D Chromatin Positions", fontsize=10, y=1.01)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {output_path}")
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -358,5 +436,23 @@ def run(config_path: str):
             figures_dir / "training_animation.gif",
             step=gif_step, fps=10,
         )
+
+    # --- Groupwise coordinates (reads analyze output) ---
+    gw_dir = output_dir / "groupwise_positions"
+    uncond_path = gw_dir / "unconditional.npy"
+    if gw_dir.exists() and uncond_path.exists() and C is not None:
+        Z_uncond = np.load(uncond_path)
+        groupwise_positions = {}
+        for p in sorted(gw_dir.glob("group_*.npy"),
+                        key=lambda p: int(p.stem.split("_")[1])):
+            g = int(p.stem.split("_")[1])
+            groupwise_positions[g] = np.load(p)
+        if groupwise_positions:
+            plot_groupwise_coordinates(
+                Z_uncond, groupwise_positions, C, group_names,
+                figures_dir / "groupwise_coordinates.png",
+            )
+    else:
+        print("  Skipping groupwise_coordinates.png — run analyze first.")
 
     print("\nFigures complete.")

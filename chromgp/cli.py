@@ -69,7 +69,8 @@ def train(config, resume, video):
 @click.option("--config", "-c", required=True, type=click.Path(exists=True), help="Path to config YAML")
 def analyze(config):
     """Analyze a trained model (extract coords, metrics)."""
-    click.echo(f"Analyze: {config} (not implemented yet)")
+    from .commands import analyze as analyze_cmd
+    analyze_cmd.run(config)
 
 
 @cli.command()
