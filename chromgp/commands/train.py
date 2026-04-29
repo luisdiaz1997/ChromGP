@@ -1,9 +1,13 @@
-"""Train a ChromGP model with SVGP prior.
+"""Train a ChromGP model (SVGP or MGGP_SVGP prior).
 
 Training loop with batch scaling following Probabilistic-NMF conventions:
     loss = -(L1 - L2)
       L1 = log p(y|F)     -- scaled by N/batch_size (and D/y_batch_size if used)
       L2 = KL[q(U)||p(U)] -- scaled by N/M (SVGP inducing-point KL)
+
+When config.groups=True the MGGP_SVGP prior is used: each genomic bin is
+assigned a ChromHMM group label (stored as C.npy) and the kernel modulates
+covariance based on group membership, following the PNMF/SF convention.
 
 Supports --resume to continue training from a saved checkpoint.
 """
@@ -23,17 +27,25 @@ from ..datasets import load_preprocessed
 from ..models import ChromGP
 
 
-def build_model(config: Config, X: torch.Tensor = None) -> nn.Module:
-    """Build ChromGP(model) with SVGP prior and batched_RBF kernels.
-
-    Batches the SVGP inducing-point parameters for L = n_components latent
-    dimensions (3D by default), following the PNMF pattern.
+def _init_groupsZ(Z: torch.Tensor, X: torch.Tensor, C: torch.Tensor) -> torch.Tensor:
+    """Assign a group label to each inducing point by nearest-bin lookup.
 
     Args:
-        config: Experiment configuration.
-        X: Bin midpoints (N,) used to initialise inducing points across the
-           data domain.  If None, Z stays at its default random init.
+        Z: Inducing point positions (M, 1).
+        X: Bin midpoints (N,).
+        C: Group labels for bins (N,), integer 0..G-1.
+
+    Returns:
+        groupsZ: Group labels for inducing points (M,), LongTensor.
     """
+    # Nearest neighbour in 1D: |Z_i - X_j| minimum over j
+    dists = torch.abs(Z.squeeze(-1).unsqueeze(1) - X.unsqueeze(0))  # (M, N)
+    nn_idx = dists.argmin(dim=1)  # (M,)
+    return C[nn_idx].long()
+
+
+def build_model_svgp(config: Config, X: torch.Tensor = None) -> nn.Module:
+    """ChromGP(SVGP) with batched (L,M) variational parameters."""
     from gpzoo.gp import SVGP
     from gpzoo.kernels import batched_RBF
     from gpzoo.modules import CholeskyParameter
@@ -47,36 +59,23 @@ def build_model(config: Config, X: torch.Tensor = None) -> nn.Module:
     sigma = float(config.model.get("sigma", 1.0))
     cholesky_mode = config.model.get("cholesky_mode", "exp")
 
-    # --- SVGP kernel (on 1D genomic coordinates — input lengthscale) ---
     svgp_kernel = batched_RBF(sigma=sigma, lengthscale=ls)
+    gp = SVGP(svgp_kernel, dim=1, M=M, jitter=jitter,
+               cholesky_mode=cholesky_mode, diagonal_only=False)
 
-    # --- SVGP with batched mu/Lu for L latent dimensions ---
-    gp = SVGP(
-        svgp_kernel, dim=1, M=M, jitter=jitter,
-        cholesky_mode=cholesky_mode, diagonal_only=False,
-    )
-
-    # Initialise inducing points Z across the data domain if coordinates provided
     if X is not None:
         x_min, x_max = X.min().item(), X.max().item()
         padding = (x_max - x_min) * 0.02
         Z_init = torch.linspace(x_min + padding, x_max - padding, M).unsqueeze(-1)
         gp.Z = nn.Parameter(Z_init, requires_grad=False)
 
-    # Replace single-output (M,) mu/Lu with (L, M) / (L, M, M)
     del gp.Lu
-    gp.Lu = CholeskyParameter(
-        (L, M), mode=cholesky_mode, diagonal_only=False,
-    )
+    gp.Lu = CholeskyParameter((L, M), mode=cholesky_mode, diagonal_only=False)
     gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
 
-    # --- Output kernel (on 3D latent positions — output lengthscale) ---
     output_kernel = batched_RBF(sigma=sigma, lengthscale=out_ls)
-
-    # --- ChromGP model ---
     model = ChromGP(gp, output_kernel, noise=noise, jitter=jitter)
 
-    # Freeze kernel hyperparameters (train only mu, Lu, noise, and optionally lengthscale)
     svgp_kernel.sigma.requires_grad = False
     if not config.model.get("train_lengthscale", False):
         svgp_kernel.lengthscale.requires_grad = False
@@ -86,8 +85,82 @@ def build_model(config: Config, X: torch.Tensor = None) -> nn.Module:
     return model
 
 
+def build_model_mggp_svgp(
+    config: Config,
+    X: torch.Tensor = None,
+    C: torch.Tensor = None,
+    n_groups: int = 1,
+) -> nn.Module:
+    """ChromGP(MGGP_SVGP) with per-group kernel and batched (L,M) variational parameters.
+
+    The MGGP kernel modulates covariance between bins by their ChromHMM group
+    membership via a group_diff_param, following the PNMF/SF pattern.
+
+    Args:
+        config: Experiment configuration.
+        X: Bin midpoints (N,) for inducing point initialisation.
+        C: Group labels (N,) for nearest-bin groupsZ initialisation.
+        n_groups: Number of unique ChromHMM groups G.
+    """
+    from gpzoo.gp import MGGP_SVGP
+    from gpzoo.kernels import batched_MGGP_RBF, batched_RBF
+    from gpzoo.modules import CholeskyParameter
+
+    L = config.model.get("n_components", 3)
+    M = config.model.get("num_inducing", 800)
+    jitter = float(config.model.get("jitter", 1e-5))
+    noise = float(config.model.get("noise", 0.1))
+    ls = float(config.model.get("lengthscale", 8.0))
+    out_ls = float(config.model.get("output_lengthscale", 1.0))
+    sigma = float(config.model.get("sigma", 1.0))
+    cholesky_mode = config.model.get("cholesky_mode", "exp")
+    group_diff_param = float(config.model.get("group_diff_param", 1.0))
+
+    # MGGP kernel: same as RBF but covariance modulated by group distance
+    mggp_kernel = batched_MGGP_RBF(
+        sigma=sigma, lengthscale=ls,
+        group_diff_param=group_diff_param, n_groups=n_groups,
+    )
+
+    gp = MGGP_SVGP(
+        mggp_kernel, dim=1, M=M, jitter=jitter,
+        n_groups=n_groups, cholesky_mode=cholesky_mode, diagonal_only=False,
+    )
+
+    # Inducing points: linspace across data range, groups by nearest bin
+    if X is not None:
+        x_min, x_max = X.min().item(), X.max().item()
+        padding = (x_max - x_min) * 0.02
+        Z_init = torch.linspace(x_min + padding, x_max - padding, M).unsqueeze(-1)
+        gp.Z = nn.Parameter(Z_init, requires_grad=False)
+
+        if C is not None:
+            groupsZ = _init_groupsZ(Z_init, X, C)
+            gp.groupsZ = nn.Parameter(groupsZ, requires_grad=False)
+
+    del gp.Lu
+    gp.Lu = CholeskyParameter((L, M), mode=cholesky_mode, diagonal_only=False)
+    gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
+
+    output_kernel = batched_RBF(sigma=sigma, lengthscale=out_ls)
+    model = ChromGP(gp, output_kernel, noise=noise, jitter=jitter)
+
+    mggp_kernel.sigma.requires_grad = False
+    mggp_kernel.group_diff_param.requires_grad = False
+    if not config.model.get("train_lengthscale", False):
+        mggp_kernel.lengthscale.requires_grad = False
+    output_kernel.sigma.requires_grad = False
+    output_kernel.lengthscale.requires_grad = False
+
+    return model
+
+
+# Keep old name as alias for backward compat with any external callers
+build_model = build_model_svgp
+
+
 def run(config_path: str, resume: bool = False, video: bool = False):
-    """Train a ChromGP model.
+    """Train a ChromGP model (SVGP or MGGP_SVGP based on config.groups).
 
     Loads preprocessed data, builds the model, runs the training loop
     (optionally resuming from a checkpoint), and saves:
@@ -110,6 +183,13 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     D = data.n_features
     print(f"Data: {data}")
 
+    use_groups = config.groups
+    if use_groups and data.C is None:
+        raise ValueError(
+            "config.groups=True but no group labels found in preprocessed data. "
+            "Re-run preprocess with groups_by set."
+        )
+
     # --- Device ---
     device_cfg = config.training.get("device", "gpu")
     if device_cfg == "cpu":
@@ -119,12 +199,21 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     print(f"Device: {device}")
 
     # --- Build model ---
-    model = build_model(config, X=data.X)
-    model = model.to(device)
     M = config.model.get("num_inducing", 800)
     L = config.model.get("n_components", 3)
+
+    if use_groups:
+        model = build_model_mggp_svgp(
+            config, X=data.X, C=data.C, n_groups=data.n_groups,
+        )
+        print(f"Model: ChromGP + MGGP_SVGP  (M={M}, L={L}, G={data.n_groups})")
+        print(f"  group_diff_param: {config.model.get('group_diff_param', 1.0)}")
+    else:
+        model = build_model_svgp(config, X=data.X)
+        print(f"Model: ChromGP + SVGP  (M={M}, L={L})")
+
+    model = model.to(device)
     train_ls = config.model.get("train_lengthscale", False)
-    print(f"Model: ChromGP + SVGP  (M={M}, L={L})")
     print(f"  Input lengthscale: trainable={train_ls}")
     print(f"  Output lengthscale: frozen (={config.model.get('output_lengthscale', 1.0)})")
 
@@ -167,9 +256,6 @@ def run(config_path: str, resume: bool = False, video: bool = False):
             start_step = ckpt.get("steps", 0)
             losses = ckpt.get("losses", [])
 
-            # Recreate scheduler with new total_steps.  Set the internal
-            # last_epoch so the next scheduler.step() lands at the right spot
-            # without having to actually step through start_step iterations.
             scheduler = _make_scheduler(optimizer, total_steps)
             scheduler.last_epoch = start_step
 
@@ -182,8 +268,9 @@ def run(config_path: str, resume: bool = False, video: bool = False):
             print("No checkpoint found, training from scratch.")
 
     # --- Data tensors ---
-    X = data.X  # (N,)
-    y = data.Y  # (N, D)
+    X = data.X        # (N,)
+    y = data.Y        # (N, D)  — note: rows=bins, cols=features/replicates
+    C = data.C        # (N,) or None
 
     # --- Training loop ---
     t0 = time.perf_counter()
@@ -196,9 +283,11 @@ def run(config_path: str, resume: bool = False, video: bool = False):
             idx = torch.multinomial(torch.ones(N), num_samples=x_bs, replacement=False)
             X_batch = X[idx].to(device)
             y_batch = y[:, idx].to(device)
+            C_batch = C[idx].to(device) if C is not None else None
         else:
             X_batch = X.to(device)
             y_batch = y.to(device)
+            C_batch = C.to(device) if C is not None else None
 
         if y_batch_size is not None:
             y_bs = min(y_batch_size, D)
@@ -209,7 +298,13 @@ def run(config_path: str, resume: bool = False, video: bool = False):
 
         # ---- Forward pass ----
         optimizer.zero_grad()
-        pY, qZ, qU, pU = model(X_batch.squeeze())
+
+        # MGGP_SVGP requires groupsX; SVGP ignores it via **kwargs
+        fwd_kwargs = {}
+        if use_groups:
+            fwd_kwargs["groupsX"] = C_batch
+
+        pY, qZ, qU, pU = model(X_batch.squeeze(), **fwd_kwargs)
 
         y_norm = y_batch - y_batch.mean(dim=1, keepdims=True)
 
@@ -230,7 +325,6 @@ def run(config_path: str, resume: bool = False, video: bool = False):
 
         losses.append(loss.item())
 
-        # Track latent means periodically (avoids multi-GB files for long runs)
         if step % 100 == 0 or step == total_steps - 1:
             Zs.append(qZ.mean.T.detach().cpu().clone().numpy())
 
@@ -282,7 +376,6 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     with open(output_dir / "training.json", "w") as f:
         json.dump(metadata, f, indent=2)
 
-    # Save a copy of the config for reference (SF convention)
     config.save_yaml(output_dir / "config.yaml")
 
     print(f"\nTraining complete. {total_steps - start_step} steps in {train_time:.1f}s")
