@@ -31,7 +31,8 @@ def generate(config):
 @click.option("--config", "-c", required=True, type=click.Path(exists=True), help="Path to config YAML")
 def preprocess(config):
     """Preprocess dataset into standardized format."""
-    click.echo(f"Preprocess: {config} (not implemented yet)")
+    from .commands import preprocess as prep_cmd
+    prep_cmd.run(config)
 
 
 @cli.command()
