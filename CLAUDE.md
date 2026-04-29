@@ -66,4 +66,14 @@ Generates ground-truth 3D shapes (`make_helix`, plus cylinder/spiral/sponge vari
 
 ### Notebooks
 
+## Tmux conventions
+
+When launching a long-running command (training, preprocessing, etc.):
+
+1. **Check which session we're in**: `tmux display-message -p '#{session_name}:#{window_index}.#{pane_index}'`
+2. **Open a pane below the current one**: `tmux split-window -v -p 30 -t <session>:<window>.<pane>` (30% height works well for a scrolling log)
+3. **Activate conda and run**: `conda activate chromgp && chromgp ...` so output is visible without stealing focus from the main session.
+
+This keeps training progress visible in a dedicated bottom pane while the top pane stays free for interactive work.
+
 The `notebooks/` directory is the actual experimental surface — each notebook plugs a different GPzoo model (`SVGP`, `WSVGP`, `WVNNGP`, `VNNGP`, `MGGP_WSVGP`) and kernel (`batched_RBF`, `BatchedBrownianKernel`, `batched_MGGP_RBF`) into `ChromGP` or `IntegratedForceGP` and runs it on either a synthetic shape or a real `.mcool` Hi-C contact map. There is no shared notebook utility module beyond `chromgp/` itself; expect duplicated boilerplate across notebooks.

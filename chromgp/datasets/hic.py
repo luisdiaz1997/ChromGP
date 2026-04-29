@@ -194,8 +194,8 @@ class HiCLoader:
         """Apply contact transform (log1p, obs_over_exp, raw)."""
         if transform == 'raw':
             return matrix
-        elif transform == 'log1p':
-            return np.log1p(matrix)
+        elif transform == 'log10':
+            return np.log10(matrix + 5e-6)
         elif transform == 'obs_over_exp':
             # TODO: implement expected contact calculation
             # For now, return log1p as placeholder

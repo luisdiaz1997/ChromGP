@@ -27,6 +27,46 @@ from ..datasets import load_preprocessed
 from ..models import ChromGP
 
 
+def _save_elbo_history(elbo_history: list, output_dir: Path) -> None:
+    """Save ELBO history (both CSV and numpy formats)."""
+    df = pd.DataFrame({"iteration": range(len(elbo_history)), "elbo": elbo_history})
+    df.to_csv(output_dir / "elbo_history.csv", index=False)
+    np.save(output_dir / "elbo_history.npy", np.array(elbo_history))
+
+
+def _append_elbo_history(new_elbo_history: list, output_dir: Path) -> None:
+    """Append new ELBO values to existing elbo_history.csv/npy (SF convention)."""
+    csv_path = output_dir / "elbo_history.csv"
+    if csv_path.exists():
+        existing_df = pd.read_csv(csv_path)
+        start_iter = int(existing_df["iteration"].max()) + 1
+    else:
+        existing_df = pd.DataFrame({"iteration": [], "elbo": []})
+        start_iter = 0
+
+    new_df = pd.DataFrame({
+        "iteration": range(start_iter, start_iter + len(new_elbo_history)),
+        "elbo": new_elbo_history,
+    })
+    combined = pd.concat([existing_df, new_df], ignore_index=True)
+    combined.to_csv(csv_path, index=False)
+    np.save(output_dir / "elbo_history.npy", combined["elbo"].values)
+
+
+def _append_trajectory(new_traj: dict, traj_path: Path) -> None:
+    """Append new segment trajectory frames to existing trajectory.npz."""
+    old = np.load(traj_path)
+    traj_data = {
+        "mu": np.concatenate([old["mu"], new_traj["mu"]], axis=0),
+        "steps": np.concatenate([old["steps"], new_traj["steps"]], axis=0),
+    }
+    if "lengthscale" in old and "lengthscale" in new_traj:
+        traj_data["lengthscale"] = np.concatenate([old["lengthscale"], new_traj["lengthscale"]])
+    elif "lengthscale" in new_traj:
+        traj_data["lengthscale"] = new_traj["lengthscale"]
+    np.savez(traj_path, **traj_data)
+
+
 def _init_groupsZ(Z: torch.Tensor, X: torch.Tensor, C: torch.Tensor) -> torch.Tensor:
     """Assign a group label to each inducing point by nearest-bin lookup.
 
@@ -238,19 +278,8 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     lr = float(config.training.get("learning_rate", 2e-3))
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    # --- Scheduler (OneCycleLR, SF convention) ---
-    total_steps = int(config.training.get("max_iter", 1000))
-
-    def _make_scheduler(opt, ts):
-        return torch.optim.lr_scheduler.OneCycleLR(
-            opt, max_lr=lr, total_steps=ts,
-            pct_start=0.3, div_factor=25.0,
-            final_div_factor=1e4, cycle_momentum=False,
-        )
-
-    scheduler = _make_scheduler(optimizer, total_steps)
-
     # --- Training parameters ---
+    max_iter = int(config.training.get("max_iter", 1000))
     batch_size = config.training.get("batch_size", None)
     y_batch_size = config.training.get("y_batch_size", None)
     scale_kl_nm = config.model.get("scale_kl_NM", True)
@@ -261,38 +290,46 @@ def run(config_path: str, resume: bool = False, video: bool = False):
 
     # --- Resume from checkpoint ---
     start_step = 0
+    prev_n_iterations = 0
     losses = []
-    # --- Track variational parameters for trajectory ---
-    # Save only mu (L, M) + lengthscale at each checkpoint step.
-    # The posterior mean q(f*|X) depends only on mu and the kernel,
-    # not on Lu, so we can reconstruct full (N, L) positions at figure
-    # time without storing the 7 MB Lu Cholesky per snapshot.
+
     L = config.model.get("n_components", 3)
     M = config.model.get("num_inducing", 800)
     train_ls = config.model.get("train_lengthscale", False)
-    Z_mus = []       # (n_snapshots, L, M)  — variational mean at inducing points
-    Z_lengthscales = []  # (n_snapshots,)  — input lengthscale (if trainable)
-    Z_steps = []       # (n_snapshots,)  — iteration number
+    Z_mus = []             # (n_snapshots, L, M)
+    Z_lengthscales = []    # (n_snapshots,)
+    Z_steps = []           # (n_snapshots,)
     checkpoint_path = save_dir / "model_final.pt"
 
     if resume:
-        if checkpoint_path.exists():
+        if not checkpoint_path.exists():
+            print("  Note: no checkpoint found, training from scratch.")
+            resume = False
+        else:
             ckpt = torch.load(checkpoint_path, map_location=device)
             model.load_state_dict(ckpt["model_state_dict"])
-            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
             start_step = ckpt.get("steps", 0)
-            losses = ckpt.get("losses", [])
 
-            scheduler = _make_scheduler(optimizer, total_steps)
-            scheduler.last_epoch = start_step
+            training_json_path = output_dir / "training.json"
+            if training_json_path.exists():
+                with open(training_json_path) as f:
+                    prev_meta = json.load(f)
+                prev_n_iterations = prev_meta.get("n_iterations", 0)
 
-            print(f"Resumed from step {start_step}/{total_steps}")
+            print(f"Resumed from step {start_step}"
+                  f"  (cumulative: {prev_n_iterations} prev + {max_iter} new)")
 
-            if start_step >= total_steps:
-                print("  Model already reached max_iter. Increase max_iter to continue training.")
-                return
-        else:
-            print("No checkpoint found, training from scratch.")
+    # SF convention: max_iter is new steps per segment, not cumulative total
+    total_steps = start_step + max_iter
+
+    def _make_scheduler(opt, ts):
+        return torch.optim.lr_scheduler.OneCycleLR(
+            opt, max_lr=lr, total_steps=ts,
+            pct_start=0.3, div_factor=25.0,
+            final_div_factor=1e4, cycle_momentum=False,
+        )
+
+    scheduler = _make_scheduler(optimizer, total_steps)
 
     # --- Data tensors ---
     X = data.X        # (N,)
@@ -302,8 +339,10 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     # --- Training loop ---
     t0 = time.perf_counter()
 
-    pbar = trange(start_step, total_steps, desc="Training", initial=start_step)
-    for step in pbar:
+    steps_to_run = total_steps - start_step
+    pbar = trange(steps_to_run, desc="Training")
+    for i in pbar:
+        step = start_step + i
         # ---- Sample batches ----
         if batch_size is not None:
             x_bs = min(batch_size, N)
@@ -369,31 +408,34 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     train_time = time.perf_counter() - t0
 
     # --- Save checkpoint ---
+    steps_completed = total_steps - start_step
     checkpoint = {
         "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
+        "steps": total_steps,               # cumulative total after this segment
         "config": config.to_dict(),
-        "losses": losses,
-        "steps": total_steps,
         "batch_size": batch_size,
         "y_batch_size": y_batch_size,
-        "start_step": start_step,
         "train_time": train_time,
     }
     torch.save(checkpoint, checkpoint_path)
-    # Save trajectory as compact mu + optional lengthscale (not full N×L positions)
+    # Save trajectory as compact mu + optional lengthscale
     traj_data = {
-        "mu": np.stack(Z_mus),          # (n_snapshots, L, M)
-        "steps": np.array(Z_steps),      # (n_snapshots,)
+        "mu": np.stack(Z_mus),              # (n_snapshots, L, M)
+        "steps": np.array(Z_steps),          # (n_snapshots,)
     }
     if train_ls:
-        traj_data["lengthscale"] = np.array(Z_lengthscales)  # (n_snapshots,)
-    np.savez(save_dir / "trajectory.npz", **traj_data)
+        traj_data["lengthscale"] = np.array(Z_lengthscales)
+    traj_path = save_dir / "trajectory.npz"
+    if resume and traj_path.exists():
+        _append_trajectory(traj_data, traj_path)
+    else:
+        np.savez(traj_path, **traj_data)
 
     # --- Save ELBO history (SF convention) ---
-    df = pd.DataFrame({"iteration": range(len(losses)), "elbo": losses})
-    df.to_csv(output_dir / "elbo_history.csv", index=False)
-    np.save(output_dir / "elbo_history.npy", np.array(losses))
+    if resume:
+        _append_elbo_history(losses, output_dir)
+    else:
+        _save_elbo_history(losses, output_dir)
 
     # --- Save training.json (SF convention) ---
     metadata = {
@@ -402,10 +444,10 @@ def run(config_path: str, resume: bool = False, video: bool = False):
         "n_components": L,
         "final_loss": float(losses[-1]),
         "training_time": train_time,
-        "max_iter": total_steps,
-        "steps_completed": total_steps - start_step,
+        "max_iter": max_iter,
+        "steps_completed": steps_completed,
         "converged": False,
-        "n_iterations": total_steps,
+        "n_iterations": prev_n_iterations + steps_completed,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "model_config": dict(config.model),
         "training_config": dict(config.training),
@@ -415,6 +457,8 @@ def run(config_path: str, resume: bool = False, video: bool = False):
             "n_groups": data.n_groups,
         },
     }
+    if resume:
+        metadata["resumed"] = True
     with open(output_dir / "training.json", "w") as f:
         json.dump(metadata, f, indent=2)
 

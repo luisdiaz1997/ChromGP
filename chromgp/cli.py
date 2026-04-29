@@ -75,8 +75,9 @@ def analyze(config):
 @cli.command()
 @click.option("--config", "-c", required=True, type=click.Path(exists=True), help="Path to config YAML")
 def figures(config):
-    """Generate publication figures."""
-    click.echo(f"Figures: {config} (not implemented yet)")
+    """Generate publication figures (ELBO curve, reconstruction, training animation)."""
+    from .commands import figures as fig_cmd
+    fig_cmd.run(config)
 
 
 @cli.command()
