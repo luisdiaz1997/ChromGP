@@ -92,10 +92,8 @@ class HiCLoader:
         gc = None
         gc_reference = preprocessing.get('gc_reference')
         if gc_reference:
-            import bioframe as bf
-            genome = bf.load_fasta(gc_reference)
-            gc_df = bf.frac_gc(bin_coords[['chrom', 'start', 'end']], genome)
-            gc = torch.from_numpy(gc_df['GC'].values.copy()).float()
+            from .gc import compute_gc
+            gc = compute_gc(bin_coords, gc_reference)
 
         # Apply contact transform
         matrix_transformed = self._apply_transform(matrix, contact_transform, clr, bin_coords)
