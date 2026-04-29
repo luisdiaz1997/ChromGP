@@ -1,16 +1,10 @@
-from setuptools import setup, find_packages
+"""
+Minimal setup.py for backwards compatibility.
 
-setup(
-    name="chromgp",
-    version="0.1",
-    packages=find_packages(),
-    install_requires=[],
-    author="Luis Chumpitaz",
-    description="A simple package for ChromGP",
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
-    ],
-    python_requires=">=3.6",
-)
+All package metadata and dependencies are defined in pyproject.toml.
+This file exists only for tools that don't fully support PEP 517/518.
+"""
+
+from setuptools import setup
+
+setup()

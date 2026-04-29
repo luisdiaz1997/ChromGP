@@ -8,9 +8,23 @@ ChromGP is a research codebase for inferring 3D chromatin structure from Hi-C-st
 
 ## Install & dependencies
 
-- Editable install: `pip install -e .` from the repo root. `setup.py` declares no dependencies — they come transitively from GPzoo, which must also be installed (typically `pip install -e .` in `../GPzoo`).
-- Runtime imports rely on `torch`, `numpy`, `matplotlib`, `plotly`, `tqdm`, and `gpzoo.{gp,kernels,utilities}`. There is no requirements.txt and no test/lint/build configuration.
-- Notebooks expect data files via symlinks into `/gladstone/engelhardt/lab/lchumpitaz/hi-c/`: `notebooks/hg38.fa` and `notebooks/hg38.fa.fai` (reference genome) and the repo-root `mcools/` symlink (`.mcool` Hi-C files). `notebooks/hg38_gc_cov_15kb.tsv` lives directly in the repo.
+Dependencies live in `pyproject.toml` (Python 3.14+, GPU PyTorch via the cu128 wheel index). `gpzoo` and `bioframe` are intentionally **not** listed there — they are sibling repos installed editable so live edits propagate.
+
+```bash
+conda create -n chromgp python=3.14 -y
+conda activate chromgp
+
+# Editable installs from sibling clones — torch comes in via this repo's pyproject
+pip install -e ../GPzoo
+pip install -e ../bioframe
+pip install -e .                  # this repo (jupyter / ipykernel come in as core deps)
+
+python -m ipykernel install --user --name chromgp --display-name "Python (chromgp)"
+```
+
+The same `python=3.14` + GPU `torch` combo is what the sibling `factorization` conda env uses, so it is known to work on this machine. The default PyPI torch wheel on Linux x86_64 already ships with CUDA — no extra `--index-url` step is needed.
+
+Notebooks expect data files via symlinks into `/gladstone/engelhardt/lab/lchumpitaz/hi-c/`: `notebooks/hg38.fa` and `notebooks/hg38.fa.fai` (reference genome) and the repo-root `mcools/` symlink (`.mcool` Hi-C files). `notebooks/hg38_gc_cov_15kb.tsv` lives directly in the repo.
 
 ## Architecture
 
