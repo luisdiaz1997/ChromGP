@@ -40,15 +40,18 @@ SPATIAL_MODEL_FIELDS = {
 SVGP_ONLY_FIELDS = {
     "num_inducing",
     "cholesky_mode",
+    "output_lengthscale",
+    "scale_kl_NM",
 }
 
 LCGP_MODEL_FIELDS = {
-    # LCGP-specific fields (placeholders for future implementation)
-    # These will be added when GPzoo has LCGP support
+    "K",
+    "precompute_knn",
+    "neighbors",
 }
 
 GROUPS_MODEL_FIELDS = {
-    "groups",
+    "group_diff_param",
 }
 
 
