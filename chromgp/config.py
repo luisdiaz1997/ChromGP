@@ -52,6 +52,7 @@ class Config:
         "n_components": 3,  # 3D output
         "kernel": "RBF",
         "lengthscale": 8.0,
+        "output_lengthscale": 1.0,
         "sigma": 1.0,
         "train_lengthscale": False,
         "num_inducing": 800,
@@ -59,6 +60,7 @@ class Config:
         "noise": 0.1,
         "jitter": 1e-5,
         "integrated_force": False,
+        "scale_kl_NM": True,
     })
 
     # Training config
@@ -68,6 +70,7 @@ class Config:
         "optimizer": "Adam",
         "device": "gpu",
         "batch_size": None,
+        "y_batch_size": None,
         "shuffle": True,
     })
 
