@@ -75,6 +75,9 @@ class HiCLoader:
         # Fetch the contact matrix for the region
         matrix = self._fetch_matrix(clr, chrom, start, end, balance=balance)
 
+        # Keep full matrix with NaN gaps for visualization
+        matrix_full = matrix.copy()
+
         # Remove fully-NaN rows and columns (centromeric / low-mappability regions)
         good_rows = ~np.isnan(matrix).all(axis=1)
         good_cols = ~np.isnan(matrix).all(axis=0)
@@ -107,6 +110,7 @@ class HiCLoader:
 
         # Keep raw contact matrix for analyze-stage metrics
         contact_raw = torch.from_numpy(matrix).float()
+        contact_raw_full = torch.from_numpy(matrix_full).float()
 
         # Handle groups
         C = None
@@ -153,6 +157,7 @@ class HiCLoader:
             group_names=group_names,
             gc=gc,
             contact_raw=contact_raw,
+            contact_raw_full=contact_raw_full,
             bin_coords=bin_coords,
             metadata=metadata,
         )

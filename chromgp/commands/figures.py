@@ -328,7 +328,13 @@ def run(config_path: str):
     data = load_preprocessed(region_dir)          # shared preprocessed dir
     N = data.n_bins
     X = data.X.numpy()
-    Y_observed = data.contact_raw.numpy() if data.contact_raw is not None else data.Y.numpy()
+    # Use full matrix with NaN gaps for observed panel (notebook convention)
+    if data.contact_raw_full is not None:
+        Y_observed = data.contact_raw_full.numpy()  # (N_full, N_full) with NaN gaps
+    elif data.contact_raw is not None:
+        Y_observed = data.contact_raw.numpy()
+    else:
+        Y_observed = data.Y.numpy()
     C = data.C.numpy().astype(int) if data.C is not None else None
     group_names = data.group_names
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

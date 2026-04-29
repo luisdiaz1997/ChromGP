@@ -47,6 +47,11 @@ def load_preprocessed(output_dir: Union[Path, str]) -> GenomicData:
     if (prep_dir / "gc.npy").exists():
         gc = torch.from_numpy(np.load(prep_dir / "gc.npy"))
 
+    # Load full contact matrix with NaN gaps (for visualization)
+    contact_raw_full = None
+    if (prep_dir / "contact_raw_full.npy").exists():
+        contact_raw_full = torch.from_numpy(np.load(prep_dir / "contact_raw_full.npy"))
+
     # Load groups if present
     C = None
     n_groups = 0
@@ -67,5 +72,6 @@ def load_preprocessed(output_dir: Union[Path, str]) -> GenomicData:
         group_names=meta.get("group_names"),
         gc=gc,
         contact_raw=contact_raw,
+        contact_raw_full=contact_raw_full,
         metadata=meta,
     )

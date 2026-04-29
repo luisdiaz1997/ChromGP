@@ -50,6 +50,7 @@ def _filter_nans(data: GenomicData) -> GenomicData:
         group_names=data.group_names,
         gc=data.gc[t_mask] if data.gc is not None else None,
         contact_raw=data.contact_raw[t_mask][:, t_mask] if data.contact_raw is not None else None,
+        contact_raw_full=data.contact_raw_full,
         bin_coords=data.bin_coords.iloc[mask].reset_index(drop=True) if data.bin_coords is not None else None,
         metadata=data.metadata,
     )
@@ -97,6 +98,8 @@ def run(config_path: str):
     np.save(output_dir / "X.npy", data.X.numpy())  # (N,)
     np.save(output_dir / "Y.npy", data.Y.numpy())  # (N, D)
     np.save(output_dir / "contact_raw.npy", data.contact_raw.numpy())  # (N, N)
+    if data.contact_raw_full is not None:
+        np.save(output_dir / "contact_raw_full.npy", data.contact_raw_full.numpy())  # (N_full, N_full) with NaN gaps
 
     # Save GC content per bin
     if data.gc is not None:
