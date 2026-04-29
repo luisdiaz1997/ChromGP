@@ -19,8 +19,12 @@ def generate(config):
     Example:
         chromgp generate -c configs/4DNFIXP4QG5B/general.yaml
     """
-    from .commands import generate as gen_cmd
-    gen_cmd.run(config)
+    from .generate import generate_configs
+
+    generated = generate_configs(config)
+    click.echo(f"Generated {len(generated)} model configs:")
+    for name, path in generated.items():
+        click.echo(f"  {name}: {path}")
 
 
 @cli.command()
