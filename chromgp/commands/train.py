@@ -211,6 +211,143 @@ def build_model_mggp_svgp(
     return model
 
 
+def build_model_lcgp(config: Config, X: torch.Tensor) -> nn.Module:
+    """ChromGP(LCGP) with batched (L,M,R) variational parameters."""
+    from gpzoo.gp import LCGP
+    from gpzoo.kernels import batched_RBF, batched_Matern32
+    from gpzoo.utilities import estimate_lcgp_rank
+    from gpzoo.knn_utilities import calculate_knn
+
+    L = config.model.get("n_components", 3)
+    N = len(X)
+    M = N  # LCGP uses all points as inducing points
+    jitter = float(config.model.get("jitter", 1e-5))
+    noise = float(config.model.get("noise", 0.1))
+    ls = float(config.model.get("lengthscale", 5e6))
+    out_ls = float(config.model.get("output_lengthscale", 1.0))
+    sigma = float(config.model.get("sigma", 1.0))
+    K = int(config.model.get("K", 50))
+    neighbors = config.model.get("neighbors", "probabilistic")
+
+    kernel_name = config.model.get("kernel", "Matern32").lower()
+    if kernel_name == "matern32":
+        lcgp_kernel = batched_Matern32(sigma=sigma, lengthscale=ls)
+    elif kernel_name == "rbf":
+        lcgp_kernel = batched_RBF(sigma=sigma, lengthscale=ls)
+    else:
+        raise ValueError(f"Unknown kernel: {kernel_name}")
+
+    gp = LCGP(lcgp_kernel, dim=1, M=M, jitter=jitter, K=K)
+
+    Z_init = X.unsqueeze(-1).clone()
+    gp.Z = nn.Parameter(Z_init, requires_grad=False)
+
+    # Initialize Lu as raw nn.Parameter
+    domain_range = (float(X.min()), float(X.max()))
+    R = estimate_lcgp_rank(ls, domain_range, dim=1, p=0.9)
+    R = max(1, min(R, 250))
+    
+    del gp.Lu
+    gp.Lu = nn.Parameter(torch.randn(L, M, R) * (1.0 / R ** 0.5))
+    gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
+
+    # Precompute KNN indices
+    raw = calculate_knn(gp, Z_init, strategy=neighbors)
+    gp.knn_idx = raw[:, :-1]
+    gp.knn_idz = raw[:, 1:]
+
+    output_kernel = batched_RBF(sigma=sigma, lengthscale=out_ls)
+    model = ChromGP(gp, output_kernel, noise=noise, jitter=jitter)
+
+    lcgp_kernel.sigma.requires_grad = False
+    if not config.model.get("train_lengthscale", False):
+        lcgp_kernel.lengthscale.requires_grad = False
+    output_kernel.sigma.requires_grad = False
+    output_kernel.lengthscale.requires_grad = False
+
+    return model
+
+
+def build_model_mggp_lcgp(
+    config: Config,
+    X: torch.Tensor = None,
+    C: torch.Tensor = None,
+    n_groups: int = 1,
+) -> nn.Module:
+    """ChromGP(MGGP_LCGP) with batched (L,M,R) variational parameters."""
+    from gpzoo.gp import MGGP_LCGP
+    from gpzoo.kernels import batched_MGGP_RBF, batched_MGGP_Matern32, batched_RBF
+    from gpzoo.utilities import estimate_lcgp_rank
+    from gpzoo.knn_utilities import calculate_knn
+
+    L = config.model.get("n_components", 3)
+    N = len(X)
+    M = N
+    jitter = float(config.model.get("jitter", 1e-5))
+    noise = float(config.model.get("noise", 0.1))
+    ls = float(config.model.get("lengthscale", 5e6))
+    out_ls = float(config.model.get("output_lengthscale", 1.0))
+    sigma = float(config.model.get("sigma", 1.0))
+    group_diff_param = float(config.model.get("group_diff_param", 1.0))
+    K = int(config.model.get("K", 50))
+    neighbors = config.model.get("neighbors", "probabilistic")
+
+    kernel_name = config.model.get("kernel", "Matern32").lower()
+    if kernel_name == "matern32":
+        mggp_kernel = batched_MGGP_Matern32(
+            sigma=sigma, lengthscale=ls,
+            group_diff_param=group_diff_param, n_groups=n_groups,
+        )
+    elif kernel_name == "rbf":
+        mggp_kernel = batched_MGGP_RBF(
+            sigma=sigma, lengthscale=ls,
+            group_diff_param=group_diff_param, n_groups=n_groups,
+        )
+    else:
+        raise ValueError(f"Unknown kernel: {kernel_name}")
+
+    gp = MGGP_LCGP(
+        mggp_kernel, dim=1, M=M, jitter=jitter,
+        n_groups=n_groups, K=K,
+    )
+
+    Z_init = X.unsqueeze(-1).clone()
+    gp.Z = nn.Parameter(Z_init, requires_grad=False)
+
+    if C is not None:
+        groupsZ = _init_groupsZ(Z_init, X, C)
+        gp.groupsZ = nn.Parameter(groupsZ, requires_grad=False)
+    else:
+        groupsZ = None
+
+    domain_range = (float(X.min()), float(X.max()))
+    R = estimate_lcgp_rank(ls, domain_range, dim=1, p=0.9)
+    R = max(1, min(R, 250))
+    
+    del gp.Lu
+    gp.Lu = nn.Parameter(torch.randn(L, M, R) * (1.0 / R ** 0.5))
+    gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
+
+    raw = calculate_knn(
+        gp, Z_init, strategy=neighbors,
+        multigroup=True,
+        groupsX=groupsZ, groupsZ=groupsZ,
+    )
+    gp.knn_idx = raw[:, :-1]
+    gp.knn_idz = raw[:, 1:]
+
+    output_kernel = batched_RBF(sigma=sigma, lengthscale=out_ls)
+    model = ChromGP(gp, output_kernel, noise=noise, jitter=jitter)
+
+    mggp_kernel.sigma.requires_grad = False
+    mggp_kernel.group_diff_param.requires_grad = False
+    if not config.model.get("train_lengthscale", False):
+        mggp_kernel.lengthscale.requires_grad = False
+    output_kernel.sigma.requires_grad = False
+    output_kernel.lengthscale.requires_grad = False
+
+    return model
+
 # Keep old name as alias for backward compat with any external callers
 build_model = build_model_svgp
 
@@ -258,16 +395,28 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     # --- Build model ---
     M = config.model.get("num_inducing", 800)
     L = config.model.get("n_components", 3)
+    prior_type = config.model.get("prior", "SVGP").upper()
 
     if use_groups:
-        model = build_model_mggp_svgp(
-            config, X=data.X, C=data.C, n_groups=data.n_groups,
-        )
-        print(f"Model: ChromGP + MGGP_SVGP  (M={M}, L={L}, G={data.n_groups})")
-        print(f"  group_diff_param: {config.model.get('group_diff_param', 1.0)}")
+        if prior_type == "LCGP":
+            model = build_model_mggp_lcgp(
+                config, X=data.X, C=data.C, n_groups=data.n_groups,
+            )
+            print(f"Model: ChromGP + MGGP_LCGP  (N={N}, L={L}, G={data.n_groups})")
+            print(f"  group_diff_param: {config.model.get('group_diff_param', 1.0)}")
+        else:
+            model = build_model_mggp_svgp(
+                config, X=data.X, C=data.C, n_groups=data.n_groups,
+            )
+            print(f"Model: ChromGP + MGGP_SVGP  (M={M}, L={L}, G={data.n_groups})")
+            print(f"  group_diff_param: {config.model.get('group_diff_param', 1.0)}")
     else:
-        model = build_model_svgp(config, X=data.X)
-        print(f"Model: ChromGP + SVGP  (M={M}, L={L})")
+        if prior_type == "LCGP":
+            model = build_model_lcgp(config, X=data.X)
+            print(f"Model: ChromGP + LCGP  (N={N}, L={L})")
+        else:
+            model = build_model_svgp(config, X=data.X)
+            print(f"Model: ChromGP + SVGP  (M={M}, L={L})")
 
     model = model.to(device)
     train_ls = config.model.get("train_lengthscale", False)
@@ -293,9 +442,6 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     prev_n_iterations = 0
     losses = []
 
-    L = config.model.get("n_components", 3)
-    M = config.model.get("num_inducing", 800)
-    train_ls = config.model.get("train_lengthscale", False)
     Z_mus = []             # (n_snapshots, L, M)
     Z_lengthscales = []    # (n_snapshots,)
     Z_steps = []           # (n_snapshots,)
@@ -336,6 +482,10 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     y = data.Y        # (N, D)  — note: rows=bins, cols=features/replicates
     C = data.C        # (N,) or None
 
+    # Save original KNN indices on CPU for easy slicing during training
+    if prior_type == "LCGP":
+        knn_idx_full = model.gp.knn_idx.clone()
+
     # --- Training loop ---
     t0 = time.perf_counter()
 
@@ -351,6 +501,8 @@ def run(config_path: str, resume: bool = False, video: bool = False):
             y_batch = y[:, idx].to(device)
             C_batch = C[idx].to(device) if C is not None else None
         else:
+            idx = None
+            x_bs = N
             X_batch = X.to(device)
             y_batch = y.to(device)
             C_batch = C.to(device) if C is not None else None
@@ -365,12 +517,22 @@ def run(config_path: str, resume: bool = False, video: bool = False):
         # ---- Forward pass ----
         optimizer.zero_grad()
 
-        # MGGP_SVGP requires groupsX; SVGP ignores it via **kwargs
+        # MGGP_SVGP / MGGP_LCGP requires groupsX; SVGP ignores it via **kwargs
         fwd_kwargs = {}
         if use_groups:
             fwd_kwargs["groupsX"] = C_batch
 
-        pY, qZ, qU, pU = model(X_batch.squeeze(), **fwd_kwargs)
+        if prior_type == "LCGP":
+            if idx is not None:
+                model.gp.knn_idx = knn_idx_full[idx.cpu()]
+            else:
+                model.gp.knn_idx = knn_idx_full
+            # Pass idx to utilize forward_train local optimization
+            spatial_idx = idx
+        else:
+            spatial_idx = None
+
+        pY, qZ, qU, pU = model(X_batch.squeeze(), idx=spatial_idx, **fwd_kwargs)
 
         y_norm = y_batch - y_batch.mean(dim=1, keepdims=True)
 
@@ -380,9 +542,12 @@ def run(config_path: str, resume: bool = False, video: bool = False):
         if y_batch_size is not None:
             L1 = L1 * D / y_bs
 
-        L2 = model.gp.kl_divergence(qU, pU).sum()
-        if scale_kl_nm:
-            L2 = L2 * N / M
+        if prior_type == "LCGP":
+            L2 = model.gp.kl_divergence_full(qZ=None, idx=idx).sum()
+        else:
+            L2 = model.gp.kl_divergence(qU, pU).sum()
+            if scale_kl_nm:
+                L2 = L2 * N / M
 
         elbo = L1 - L2
         loss = -elbo

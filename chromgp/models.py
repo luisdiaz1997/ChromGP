@@ -11,11 +11,14 @@ class ChromGP(nn.Module):
         self.jitter = jitter
         self.noise = nn.Parameter(torch.tensor(noise))
 
-    def forward(self, X, E=1, verbose=False, **kwargs):
+    def forward(self, X, E=1, verbose=False, idx=None, **kwargs):
         N = len(X)
         noise = torch.nn.functional.softplus(self.noise)  # ensure positive
 
-        qZ, qU, pU = self.gp(X, verbose=verbose, **kwargs)
+        if idx is not None and hasattr(self.gp, 'forward_train'):
+            qZ, qU, pU = self.gp.forward_train(X, idx=idx, verbose=verbose, **kwargs)
+        else:
+            qZ, qU, pU = self.gp(X, verbose=verbose, **kwargs)
         F = qZ.rsample((E,)) # (E, D, N)
         F = F.transpose(-2, -1)  # (E, N, D)
 

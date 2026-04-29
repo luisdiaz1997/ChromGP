@@ -61,6 +61,9 @@ class Config:
         "jitter": 1e-5,
         "integrated_force": False,
         "scale_kl_NM": True,
+        "K": 50,
+        "neighbors": "probabilistic",
+        "precompute_knn": True,
     })
 
     # Training config
