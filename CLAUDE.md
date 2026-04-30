@@ -66,6 +66,10 @@ Generates ground-truth 3D shapes (`make_helix`, plus cylinder/spiral/sponge vari
 
 ### Notebooks
 
+## Git conventions
+
+**Never commit or push unless explicitly told to.** Make code changes freely, but always wait for the user to say "commit" or "push" before running any `git commit` or `git push` command.
+
 ## Tmux conventions
 
 When launching a long-running command (training, preprocessing, etc.):

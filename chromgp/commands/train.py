@@ -95,7 +95,7 @@ def build_model(
     local (prior='LCGP') selects LCGP vs SVGP; groups (C is not None) selects
     the MGGP variant with per-group kernel.
     """
-    from gpzoo.kernels import batched_RBF  # always needed for output kernel
+    from gpzoo.kernels import batched_RBF, batched_Matern32  # batched_RBF still used for rbf input kernel
 
     L = config.model.get("n_components", 3)
     jitter = float(config.model.get("jitter", 1e-5))
@@ -203,7 +203,7 @@ def build_model(
         gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
 
     # --- 3. ChromGP wrapper ---
-    output_kernel = batched_RBF(sigma=sigma, lengthscale=out_ls)
+    output_kernel = batched_Matern32(sigma=sigma, lengthscale=out_ls)
     model = ChromGP(gp, output_kernel, noise=noise, jitter=jitter)
 
     # --- 4. Freeze kernel hyperparams ---
