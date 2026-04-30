@@ -147,10 +147,26 @@ def _group_boundaries(C_full: np.ndarray) -> np.ndarray:
     return (valid_idx[1:][change_mask] - 0.5).astype(float)
 
 
+def _set_genomic_ticks(ax, n_bins: int, resolution: int, start_bp: int) -> None:
+    """Add genomic position tick labels in kb at the bottom x-axis only."""
+    ax.xaxis.set_ticks_position("bottom")
+    xticks = ax.xaxis.get_ticklocs()
+    valid_xt = xticks[(xticks >= 0) & (xticks < n_bins)].astype(int)
+    if len(valid_xt):
+        ax.set_xticks(valid_xt)
+        ax.set_xticklabels(
+            ((valid_xt * resolution + start_bp) // 1000),
+            fontsize=6, rotation=45, ha="right",
+        )
+    ax.set_yticks([])
+
+
 def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
                         C: np.ndarray | None = None,
                         group_names: list | None = None,
                         valid_mask: np.ndarray | None = None,
+                        resolution: int | None = None,
+                        start_bp: int = 0,
                         output_path: Path | None = None) -> None:
     """1x3 panel: 3D structure colored by group | reconstructed distances | observed.
 
@@ -166,22 +182,31 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
         valid_mask: Optional (N_full,) bool mask to expand reconstruction with NaN gaps.
         output_path: Where to save the figure.
     """
-    tk = 0.25  # track thickness relative to panel size of 5
+    tk = 0.25    # track thickness
+    cbar_w = 0.3  # dedicated colorbar column width
 
     if C is not None:
-        # Layout: rows=[h-track(thin), main], cols=[3D, v-track, recon, v-track, obs]
-        fig = plt.figure(figsize=(19.0, 5.5))
-        gs = gridspec.GridSpec(2, 5, figure=fig,
-                               width_ratios=[5, tk, 5, tk, 5],
-                               height_ratios=[tk, 5],
+        # cols: [3D | v-tk | recon | cbar | v-tk | obs | cbar]
+        # rows: [h-track(thin) | main]
+        # Figure sized so each GridSpec unit = 1 inch → matrix panels are
+        # exactly ps×ps inches (square) regardless of track/cbar widths.
+        ps = 3.5
+        w_ratios = [ps, tk, ps, cbar_w, tk, ps, cbar_w]
+        h_ratios = [tk, ps]
+        fig = plt.figure(figsize=(sum(w_ratios), sum(h_ratios)))
+        gs = gridspec.GridSpec(2, 7, figure=fig,
+                               width_ratios=w_ratios,
+                               height_ratios=h_ratios,
                                wspace=0.02, hspace=0.02)
-        ax1 = fig.add_subplot(gs[:, 0], projection="3d")
+        ax1    = fig.add_subplot(gs[:, 0], projection="3d")
         ax_ht2 = fig.add_subplot(gs[0, 2])
         ax_vt2 = fig.add_subplot(gs[1, 1])
-        ax2   = fig.add_subplot(gs[1, 2])
-        ax_ht3 = fig.add_subplot(gs[0, 4])
-        ax_vt3 = fig.add_subplot(gs[1, 3])
-        ax3   = fig.add_subplot(gs[1, 4])
+        ax2    = fig.add_subplot(gs[1, 2])
+        ax_cb2 = fig.add_subplot(gs[1, 3])
+        ax_ht3 = fig.add_subplot(gs[0, 5])
+        ax_vt3 = fig.add_subplot(gs[1, 4])
+        ax3    = fig.add_subplot(gs[1, 5])
+        ax_cb3 = fig.add_subplot(gs[1, 6])
     else:
         fig = plt.figure(figsize=(18, 5))
         ax1 = fig.add_subplot(1, 3, 1, projection="3d")
@@ -214,22 +239,37 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
     if valid_mask is not None:
         recon_dist = _expand_to_full(recon_dist, valid_mask)
     im2 = ax2.matshow(recon_dist, cmap="YlOrRd_r", aspect="auto")
-    ax2.set_title("Reconstructed Distances", fontsize=12)
-    plt.colorbar(im2, ax=ax2, fraction=0.046)
+    if C is None:
+        ax2.set_title("Reconstructed Distances", fontsize=12)
 
     # --- Panel 3: Observed data ---
     Y_obs = np.log10(Y + 5e-6)
     im3 = ax3.matshow(Y_obs, cmap="YlOrRd", aspect="auto")
-    ax3.set_title("Observed Contact Matrix", fontsize=12)
-    plt.colorbar(im3, ax=ax3, fraction=0.046)
+    if C is None:
+        ax3.set_title("Observed Contact Matrix", fontsize=12)
 
-    # --- ChromHMM tracks ---
+    if C is not None:
+        fig.colorbar(im2, cax=ax_cb2)
+        fig.colorbar(im3, cax=ax_cb3)
+    else:
+        plt.colorbar(im2, ax=ax2, fraction=0.046)
+        plt.colorbar(im3, ax=ax3, fraction=0.046)
+
+    # --- ChromHMM tracks (title placed on h-track axis so it sits above the track) ---
     if C is not None:
         C_full = _expand_groups(C, valid_mask)
         _draw_chromhmm_track(ax_ht2, C_full, group_names, horizontal=True)
+        ax_ht2.set_title("Reconstructed Distances", fontsize=9, pad=3)
         _draw_chromhmm_track(ax_vt2, C_full, group_names, horizontal=False)
         _draw_chromhmm_track(ax_ht3, C_full, group_names, horizontal=True)
+        ax_ht3.set_title("Observed Contact Matrix", fontsize=9, pad=3)
         _draw_chromhmm_track(ax_vt3, C_full, group_names, horizontal=False)
+
+    # --- Genomic position ticks (plotmap convention: bottom + right) ---
+    if resolution is not None:
+        n_bins_full = recon_dist.shape[0]
+        _set_genomic_ticks(ax2, n_bins_full, resolution, start_bp)
+        _set_genomic_ticks(ax3, n_bins_full, resolution, start_bp)
 
     fig.tight_layout()
     if output_path:
@@ -444,7 +484,9 @@ def plot_groupwise_reconstructions(
     group_names: list,
     valid_mask: np.ndarray | None,
     output_path: Path,
-    panel_size: float = 4.5,
+    panel_size: float = 3.5,
+    resolution: int | None = None,
+    start_bp: int = 0,
 ) -> None:
     """2-row grid: 3D structure (top) + reconstructed distances (bottom) per group.
 
@@ -540,8 +582,11 @@ def plot_groupwise_reconstructions(
         # Reconstruction matrix — no colorbar here so its width is never stolen
         ax2d = fig.add_subplot(gs[2, 2 * col_i + 1])
         last_im = ax2d.matshow(recon_mat, cmap="YlOrRd_r", aspect="auto", vmin=vmin, vmax=vmax)
-        ax2d.set_xticks([])
-        ax2d.set_yticks([])
+        if resolution is not None:
+            _set_genomic_ticks(ax2d, recon_mat.shape[0], resolution, start_bp)
+        else:
+            ax2d.set_xticks([])
+            ax2d.set_yticks([])
 
     # Single shared colorbar in the dedicated rightmost column
     ax_cbar = fig.add_subplot(gs[2, -1])
@@ -615,6 +660,16 @@ def run(config_path: str, animation: bool = False):
     valid_mask_np = data.valid_mask.numpy() if data.valid_mask is not None else None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # --- Genomic coordinate info for position tick labels ---
+    prep = data.metadata.get("preprocessing", {})
+    resolution = prep.get("resolution")
+    _region_str = prep.get("region", "")
+    if ":" in _region_str:
+        _coords = _region_str.split(":")[1]
+        start_bp = int(_coords.split("-")[0])
+    else:
+        start_bp = 0
+
     print(f"Data: {data}")
 
     # --- ELBO curve ---
@@ -653,6 +708,7 @@ def run(config_path: str, animation: bool = False):
             Z_final = qZ.mean.T.cpu().numpy()  # (N, L)
         plot_reconstruction(Z_final, X, Y_observed, C, group_names,
                           valid_mask=valid_mask_np,
+                          resolution=resolution, start_bp=start_bp,
                           output_path=figures_dir / "reconstruction.png")
 
     # --- Training animation (only with --animation) ---
@@ -744,6 +800,7 @@ def run(config_path: str, animation: bool = False):
                 Z_uncond, groupwise_positions, C, group_names,
                 valid_mask=valid_mask_np,
                 output_path=figures_dir / "groupwise_reconstructions.png",
+                resolution=resolution, start_bp=start_bp,
             )
     else:
         print("  Skipping groupwise figures — run analyze first.")
