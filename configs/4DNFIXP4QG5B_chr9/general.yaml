@@ -1,4 +1,4 @@
-name: GM12878_chr19
+name: GM12878_chr9
 seed: 67
 dataset: 4DNFIXP4QG5B
 output_dir: outputs/4DNFIXP4QG5B
@@ -6,13 +6,13 @@ output_dir: outputs/4DNFIXP4QG5B
 preprocessing:
   mcool_path: /gladstone/engelhardt/lab/lchumpitaz/hi-c/mcools/4DNFIXP4QG5B.mcool
   resolution: 25000
-  region: chr19
+  region: chr9
   balance: true
   contact_transform: log10
   num_replicates: 1
   noise_level: 0.15
   groups_by: chromhmm_state
-  chromhmm_bed: /gladstone/engelhardt/lab/lchumpitaz/datasets/chromhmm/ENCFF140VIG.bed
+  chromhmm_bed: /gladstone/engelhardt/lab/lchumpitaz/datasets/chromhmm/E116_15_coreMarks_hg38lift_mnemonics.bed
   chromhmm_states: null
   gc_reference: /gladstone/engelhardt/home/lchumpitaz/gitclones/ChromGP/notebooks/hg38.fa
 

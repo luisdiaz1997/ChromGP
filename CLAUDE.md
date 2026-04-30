@@ -64,9 +64,28 @@ When changing the model contract, the forward signature `(pY, qZ, qU, pU)` and t
 
 Generates ground-truth 3D shapes (`make_helix`, plus cylinder/spiral/sponge variants in notebooks), produces noisy replicate point clouds with `generate_simulations`, converts distance matrices to contact maps via a Poisson distance-decay model in `compute_contacts`, and renders side-by-side 3D-trajectory + reconstructed-distance + true-distance MP4 animations via `create_animation`.
 
+### ChromHMM data sources
+
+Three ChromHMM models are available in `/gladstone/engelhardt/lab/lchumpitaz/datasets/chromhmm/`. All three are for **GM12878** — they differ in which consortium produced them, which histone marks were used for training, and how Polycomb is resolved.
+
+| File | Consortium | States | Polycomb states | Polycomb on chr9 | Source |
+|------|-----------|--------|----------------|-------------------|--------|
+| `ENCFF140VIG.bed` | ENCODE (Weng Lab) | 15 | ReprPC, Biv | 2.5M bp (1.8%) | ENCODE portal |
+| `ENCFF338RIC.bed` | ENCODE (Weng Lab) | 18 | ReprPC, ReprPCWk, TssBiv, EnhBiv | — | ENCODE portal |
+| `E116_15_coreMarks_hg38lift_mnemonics.bed.gz` | NIH Roadmap (E116) | 15 | TssBiv, BivFlnk, EnhBiv, ReprPC, ReprPCWk | 13.8M bp (10.0%) | `egg2.wustl.edu/roadmap/` |
+
+**Why the large Polycomb discrepancy (1.8% vs 10.0% on chr9)?** Both ENCFF140VIG and E116 are GM12878 15-state models, but they were trained on different histone mark panels:
+
+- **Roadmap E116 "core marks" model**: trained on 5 marks — H3K4me3, H3K4me1, H3K36me3, **H3K27me3**, H3K9me3. H3K27me3 is the canonical Polycomb/PRC2 mark, giving this model strong power to resolve repressed chromatin into distinct sub-states (TssBiv, BivFlnk, EnhBiv, ReprPC, ReprPCWk).
+- **ENCFF140VIG**: trained on a different set of ENCODE ChIP-seq marks for GM12878. Without the same H3K27me3-driven resolution, most ambiguous/weakly-repressed regions collapse into the Quiescent state instead of being called as Polycomb.
+
+**Practical impact**: the HMMC reference notebook (`../HMMC/extra_notebooks/Plot_Polycomb.ipynb`) uses the Roadmap E116 model. For reproducing figures or benchmarking against HMMC, use the E116 file. The ENCFF140VIG model under-calls Polycomb by ~5.5× on chr9 relative to the Roadmap gold standard.
+
+The merge map in `chromgp/datasets/chromhmm.py` handles all three naming conventions (ENCODE 15-state, ENCODE 18-state, Roadmap E116 numbered-prefix style).
+
 ### ChromHMM state grouping
 
-Fine-grained ChromHMM states are merged into 5 coarse biological groups **before** bin-majority assignment (in `hic.py`, via `chromhmm.merge_chromhmm_groups`). This reduces extreme Quiescent imbalance and makes minority groups more interpretable.
+Fine-grained ChromHMM states are merged into 5 coarse biological groups **before** bin-majority assignment (in `hic.py`, via `chromhmm.merge_chromhmm_groups`). The merge map in `chromgp/datasets/chromhmm.py` handles all three naming conventions above. This reduces extreme Quiescent imbalance and makes minority groups more interpretable.
 
 | Group           | States included                                                              |
 |-----------------|------------------------------------------------------------------------------|

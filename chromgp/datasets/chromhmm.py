@@ -23,7 +23,7 @@ import torch
 # Polycomb    | Polycomb Repressed, Bivalent
 # Quiescent   | Quiescent
 CHROMHMM_MERGE_MAP: dict[str, str] = {
-    # Active regulatory
+    # ENCODE 15-state
     'Tss':      'Active',
     'TssFlnk':  'Active',
     'TssFlnkD': 'Active',
@@ -32,25 +32,43 @@ CHROMHMM_MERGE_MAP: dict[str, str] = {
     'Enh2':     'Active',
     'EnhG1':    'Active',
     'EnhG2':    'Active',
-    # 18-state equivalents
+    # ENCODE 18-state equivalents
     'TssA':     'Active',
     'EnhA1':    'Active',
     'EnhA2':    'Active',
     'EnhWk':    'Active',
-    # Transcribed
+    # Roadmap E116 15-state (numbered prefixes)
+    '1_TssA':       'Active',
+    '2_TssAFlnk':   'Active',
+    '6_EnhG':       'Active',
+    '7_Enh':        'Active',
+    # Transcribed (ENCODE)
     'Tx':       'Transcribed',
     'TxWk':     'Transcribed',
+    # Transcribed (Roadmap E116)
+    '3_TxFlnk': 'Transcribed',
+    '4_Tx':     'Transcribed',
+    '5_TxWk':   'Transcribed',
     # Heterochromatin
     'Het':          'Heterochromatin',
     'ZNF/Rpts':     'Heterochromatin',
-    # Polycomb / repressed
+    '8_ZNF/Rpts':   'Heterochromatin',
+    '9_Het':        'Heterochromatin',
+    # Polycomb / repressed (ENCODE)
     'ReprPC':   'Polycomb',
     'ReprPCWk': 'Polycomb',
     'Biv':      'Polycomb',
     'TssBiv':   'Polycomb',
     'EnhBiv':   'Polycomb',
+    # Polycomb / repressed (Roadmap E116)
+    '10_TssBiv':    'Polycomb',
+    '11_BivFlnk':   'Polycomb',
+    '12_EnhBiv':    'Polycomb',
+    '13_ReprPC':    'Polycomb',
+    '14_ReprPCWk':  'Polycomb',
     # Quiescent
     'Quies':    'Quiescent',
+    '15_Quies': 'Quiescent',
 }
 
 
@@ -141,9 +159,10 @@ def load_chromhmm_bed(bed_path: Union[Path, str], state_whitelist: Optional[List
 def assign_chromhmm_states(bins: pd.DataFrame, chromhmm: pd.DataFrame) -> torch.Tensor:
     """Assign chromatin states to bins using dominant overlap.
 
-    Each bin is assigned the chromatin state that covers the most base pairs
-    within that bin. Bins with no overlap are assigned the most common
-    genome-wide state.
+    Each bin is assigned the non-Quiescent state that covers the most base
+    pairs within that bin. Bins with only Quiescent segments are assigned
+    Quiescent. Bins with no overlap are assigned the most common genome-wide
+    state.
 
     Parameters
     ----------
@@ -182,12 +201,26 @@ def assign_chromhmm_states(bins: pd.DataFrame, chromhmm: pd.DataFrame) -> torch.
     # Drop rows with no overlap (chrom_ will be NaN) or mismatched chromosomes
     overlaps = overlaps.dropna(subset=['state_'])
 
-    # For each bin, pick the state with largest overlap
-    dominant_idx = overlaps.loc[overlaps.groupby('bin_index')['overlap_bp'].idxmax()]
+    # Get the state column name from the overlap result
+    state_col = [c for c in overlaps.columns if c.endswith('state_')][0]
+
+    # For each bin, pick the largest *non-Quiescent* state by overlap.
+    # If a bin has only Quiescent segments, it stays Quiescent.
+    dominant_parts = []
+    non_q = overlaps[overlaps[state_col] != 'Quiescent']
+    if len(non_q) > 0:
+        dominant_parts.append(non_q.loc[non_q.groupby('bin_index')['overlap_bp'].idxmax()])
+
+    q_only = overlaps[overlaps[state_col] == 'Quiescent']
+    bins_with_non_q = set(dominant_parts[0]['bin_index']) if dominant_parts else set()
+    q_only = q_only[~q_only['bin_index'].isin(bins_with_non_q)]
+    if len(q_only) > 0:
+        dominant_parts.append(q_only.loc[q_only.groupby('bin_index')['overlap_bp'].idxmax()])
+
+    dominant_idx = pd.concat(dominant_parts) if dominant_parts else pd.DataFrame()
 
     # Get the state for each bin
     C = np.full(len(bins), -1, dtype=np.int64)
-    state_col = [c for c in overlaps.columns if c.endswith('state_')][0]
 
     for _, row in dominant_idx.iterrows():
         C[int(row['bin_index'])] = state_to_id[row[state_col]]
