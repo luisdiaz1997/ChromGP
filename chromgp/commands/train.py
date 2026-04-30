@@ -84,272 +84,138 @@ def _init_groupsZ(Z: torch.Tensor, X: torch.Tensor, C: torch.Tensor) -> torch.Te
     return C[nn_idx].long()
 
 
-def build_model_svgp(config: Config, X: torch.Tensor = None) -> nn.Module:
-    """ChromGP(SVGP) with batched (L,M) variational parameters."""
-    from gpzoo.gp import SVGP
-    from gpzoo.kernels import batched_RBF, batched_Matern32
-    from gpzoo.modules import CholeskyParameter
-
-    L = config.model.get("n_components", 3)
-    M = config.model.get("num_inducing", 800)
-    jitter = float(config.model.get("jitter", 1e-5))
-    noise = float(config.model.get("noise", 0.1))
-    ls = float(config.model.get("lengthscale", 5e6))
-    out_ls = float(config.model.get("output_lengthscale", 1.0))
-    sigma = float(config.model.get("sigma", 1.0))
-    cholesky_mode = config.model.get("cholesky_mode", "exp")
-
-    # Input kernel on 1D genomic coordinates — Matern32 is default (SF convention)
-    kernel_name = config.model.get("kernel", "Matern32").lower()
-    if kernel_name == "matern32":
-        svgp_kernel = batched_Matern32(sigma=sigma, lengthscale=ls)
-    elif kernel_name == "rbf":
-        svgp_kernel = batched_RBF(sigma=sigma, lengthscale=ls)
-    else:
-        raise ValueError(f"Unknown kernel: {kernel_name}")
-    gp = SVGP(svgp_kernel, dim=1, M=M, jitter=jitter,
-               cholesky_mode=cholesky_mode, diagonal_only=False)
-
-    if X is not None:
-        x_min, x_max = X.min().item(), X.max().item()
-        padding = (x_max - x_min) * 0.02
-        Z_init = torch.linspace(x_min + padding, x_max - padding, M).unsqueeze(-1)
-        gp.Z = nn.Parameter(Z_init, requires_grad=False)
-
-    del gp.Lu
-    gp.Lu = CholeskyParameter((L, M), mode=cholesky_mode, diagonal_only=False)
-    gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
-
-    output_kernel = batched_RBF(sigma=sigma, lengthscale=out_ls)
-    model = ChromGP(gp, output_kernel, noise=noise, jitter=jitter)
-
-    svgp_kernel.sigma.requires_grad = False
-    if not config.model.get("train_lengthscale", False):
-        svgp_kernel.lengthscale.requires_grad = False
-    output_kernel.sigma.requires_grad = False
-    output_kernel.lengthscale.requires_grad = False
-
-    return model
-
-
-def build_model_mggp_svgp(
+def build_model(
     config: Config,
-    X: torch.Tensor = None,
+    X: torch.Tensor,
     C: torch.Tensor = None,
     n_groups: int = 1,
 ) -> nn.Module:
-    """ChromGP(MGGP_SVGP) with per-group kernel and batched (L,M) variational parameters.
+    """Build a ChromGP model.
 
-    The MGGP kernel modulates covariance between bins by their ChromHMM group
-    membership via a group_diff_param, following the PNMF/SF pattern.
-
-    Args:
-        config: Experiment configuration.
-        X: Bin midpoints (N,) for inducing point initialisation.
-        C: Group labels (N,) for nearest-bin groupsZ initialisation.
-        n_groups: Number of unique ChromHMM groups G.
+    local (prior='LCGP') selects LCGP vs SVGP; groups (C is not None) selects
+    the MGGP variant with per-group kernel.
     """
-    from gpzoo.gp import MGGP_SVGP
-    from gpzoo.kernels import batched_MGGP_RBF, batched_MGGP_Matern32, batched_RBF
-    from gpzoo.modules import CholeskyParameter
+    from gpzoo.kernels import batched_RBF  # always needed for output kernel
 
     L = config.model.get("n_components", 3)
-    M = config.model.get("num_inducing", 800)
     jitter = float(config.model.get("jitter", 1e-5))
     noise = float(config.model.get("noise", 0.1))
     ls = float(config.model.get("lengthscale", 5e6))
     out_ls = float(config.model.get("output_lengthscale", 1.0))
     sigma = float(config.model.get("sigma", 1.0))
-    cholesky_mode = config.model.get("cholesky_mode", "exp")
-    group_diff_param = float(config.model.get("group_diff_param", 1.0))
-
-    # Input kernel on 1D genomic coordinates — Matern32 is default (SF convention)
     kernel_name = config.model.get("kernel", "Matern32").lower()
-    if kernel_name == "matern32":
-        mggp_kernel = batched_MGGP_Matern32(
-            sigma=sigma, lengthscale=ls,
-            group_diff_param=group_diff_param, n_groups=n_groups,
-        )
-    elif kernel_name == "rbf":
-        mggp_kernel = batched_MGGP_RBF(
-            sigma=sigma, lengthscale=ls,
-            group_diff_param=group_diff_param, n_groups=n_groups,
-        )
+    prior_type = config.model.get("prior", "SVGP").upper()
+
+    local = prior_type == "LCGP"
+    groups = C is not None
+
+    # --- 1. Input kernel ---
+    if groups:
+        from gpzoo.kernels import batched_MGGP_RBF, batched_MGGP_Matern32
+        group_diff_param = float(config.model.get("group_diff_param", 1.0))
+        if kernel_name == "matern32":
+            input_kernel = batched_MGGP_Matern32(
+                sigma=sigma, lengthscale=ls,
+                group_diff_param=group_diff_param, n_groups=n_groups,
+            )
+        elif kernel_name == "rbf":
+            input_kernel = batched_MGGP_RBF(
+                sigma=sigma, lengthscale=ls,
+                group_diff_param=group_diff_param, n_groups=n_groups,
+            )
+        else:
+            raise ValueError(f"Unknown kernel: {kernel_name}")
     else:
-        raise ValueError(f"Unknown kernel: {kernel_name}")
+        from gpzoo.kernels import batched_Matern32
+        if kernel_name == "matern32":
+            input_kernel = batched_Matern32(sigma=sigma, lengthscale=ls)
+        elif kernel_name == "rbf":
+            input_kernel = batched_RBF(sigma=sigma, lengthscale=ls)
+        else:
+            raise ValueError(f"Unknown kernel: {kernel_name}")
 
-    gp = MGGP_SVGP(
-        mggp_kernel, dim=1, M=M, jitter=jitter,
-        n_groups=n_groups, cholesky_mode=cholesky_mode, diagonal_only=False,
-    )
+    # --- 2. GP + inducing points (local=LCGP vs SVGP; groups=MGGP variant) ---
+    if local:
+        from gpzoo.gp import LCGP, MGGP_LCGP
+        from gpzoo.utilities import estimate_lcgp_rank
+        from gpzoo.knn_utilities import calculate_knn
 
-    # Inducing points: linspace across data range, groups by nearest bin
-    if X is not None:
-        x_min, x_max = X.min().item(), X.max().item()
-        padding = (x_max - x_min) * 0.02
-        Z_init = torch.linspace(x_min + padding, x_max - padding, M).unsqueeze(-1)
+        M = len(X)  # LCGP uses all points as inducing
+        K = int(config.model.get("K", 50))
+        neighbors = config.model.get("neighbors", "probabilistic")
+
+        if groups:
+            gp = MGGP_LCGP(input_kernel, dim=1, M=M, jitter=jitter, n_groups=n_groups, K=K)
+        else:
+            gp = LCGP(input_kernel, dim=1, M=M, jitter=jitter, K=K)
+
+        Z_init = X.unsqueeze(-1).clone()
         gp.Z = nn.Parameter(Z_init, requires_grad=False)
 
-        if C is not None:
+        groupsZ = None
+        if groups:
             groupsZ = _init_groupsZ(Z_init, X, C)
             gp.groupsZ = nn.Parameter(groupsZ, requires_grad=False)
 
-    del gp.Lu
-    gp.Lu = CholeskyParameter((L, M), mode=cholesky_mode, diagonal_only=False)
-    gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
+        domain_range = (float(X.min()), float(X.max()))
+        R = estimate_lcgp_rank(ls, domain_range, dim=1, p=0.99)
+        R = max(1, min(R, 250))
+        del gp.Lu
+        gp.Lu = nn.Parameter(torch.randn(L, M, R) * (1.0 / R ** 0.5))
+        gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
 
-    output_kernel = batched_RBF(sigma=sigma, lengthscale=out_ls)
-    model = ChromGP(gp, output_kernel, noise=noise, jitter=jitter)
-
-    mggp_kernel.sigma.requires_grad = False
-    mggp_kernel.group_diff_param.requires_grad = False
-    if not config.model.get("train_lengthscale", False):
-        mggp_kernel.lengthscale.requires_grad = False
-    output_kernel.sigma.requires_grad = False
-    output_kernel.lengthscale.requires_grad = False
-
-    return model
-
-
-def build_model_lcgp(config: Config, X: torch.Tensor) -> nn.Module:
-    """ChromGP(LCGP) with batched (L,M,R) variational parameters."""
-    from gpzoo.gp import LCGP
-    from gpzoo.kernels import batched_RBF, batched_Matern32
-    from gpzoo.utilities import estimate_lcgp_rank
-    from gpzoo.knn_utilities import calculate_knn
-
-    L = config.model.get("n_components", 3)
-    N = len(X)
-    M = N  # LCGP uses all points as inducing points
-    jitter = float(config.model.get("jitter", 1e-5))
-    noise = float(config.model.get("noise", 0.1))
-    ls = float(config.model.get("lengthscale", 5e6))
-    out_ls = float(config.model.get("output_lengthscale", 1.0))
-    sigma = float(config.model.get("sigma", 1.0))
-    K = int(config.model.get("K", 50))
-    neighbors = config.model.get("neighbors", "probabilistic")
-
-    kernel_name = config.model.get("kernel", "Matern32").lower()
-    if kernel_name == "matern32":
-        lcgp_kernel = batched_Matern32(sigma=sigma, lengthscale=ls)
-    elif kernel_name == "rbf":
-        lcgp_kernel = batched_RBF(sigma=sigma, lengthscale=ls)
-    else:
-        raise ValueError(f"Unknown kernel: {kernel_name}")
-
-    gp = LCGP(lcgp_kernel, dim=1, M=M, jitter=jitter, K=K)
-
-    Z_init = X.unsqueeze(-1).clone()
-    gp.Z = nn.Parameter(Z_init, requires_grad=False)
-
-    # Initialize Lu as raw nn.Parameter
-    domain_range = (float(X.min()), float(X.max()))
-    R = estimate_lcgp_rank(ls, domain_range, dim=1, p=0.99)
-    R = max(1, min(R, 250))
-    
-    del gp.Lu
-    gp.Lu = nn.Parameter(torch.randn(L, M, R) * (1.0 / R ** 0.5))
-    gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
-
-    # Precompute KNN indices
-    raw = calculate_knn(gp, Z_init, strategy=neighbors)
-    gp.knn_idx = raw[:, :-1]
-    gp.knn_idz = raw[:, 1:]
-
-    output_kernel = batched_RBF(sigma=sigma, lengthscale=out_ls)
-    model = ChromGP(gp, output_kernel, noise=noise, jitter=jitter)
-
-    lcgp_kernel.sigma.requires_grad = False
-    if not config.model.get("train_lengthscale", False):
-        lcgp_kernel.lengthscale.requires_grad = False
-    output_kernel.sigma.requires_grad = False
-    output_kernel.lengthscale.requires_grad = False
-
-    return model
-
-
-def build_model_mggp_lcgp(
-    config: Config,
-    X: torch.Tensor = None,
-    C: torch.Tensor = None,
-    n_groups: int = 1,
-) -> nn.Module:
-    """ChromGP(MGGP_LCGP) with batched (L,M,R) variational parameters."""
-    from gpzoo.gp import MGGP_LCGP
-    from gpzoo.kernels import batched_MGGP_RBF, batched_MGGP_Matern32, batched_RBF
-    from gpzoo.utilities import estimate_lcgp_rank
-    from gpzoo.knn_utilities import calculate_knn
-
-    L = config.model.get("n_components", 3)
-    N = len(X)
-    M = N
-    jitter = float(config.model.get("jitter", 1e-5))
-    noise = float(config.model.get("noise", 0.1))
-    ls = float(config.model.get("lengthscale", 5e6))
-    out_ls = float(config.model.get("output_lengthscale", 1.0))
-    sigma = float(config.model.get("sigma", 1.0))
-    group_diff_param = float(config.model.get("group_diff_param", 1.0))
-    K = int(config.model.get("K", 50))
-    neighbors = config.model.get("neighbors", "probabilistic")
-
-    kernel_name = config.model.get("kernel", "Matern32").lower()
-    if kernel_name == "matern32":
-        mggp_kernel = batched_MGGP_Matern32(
-            sigma=sigma, lengthscale=ls,
-            group_diff_param=group_diff_param, n_groups=n_groups,
+        raw = calculate_knn(
+            gp, Z_init, strategy=neighbors,
+            multigroup=groups, groupsX=groupsZ, groupsZ=groupsZ,
         )
-    elif kernel_name == "rbf":
-        mggp_kernel = batched_MGGP_RBF(
-            sigma=sigma, lengthscale=ls,
-            group_diff_param=group_diff_param, n_groups=n_groups,
-        )
+        gp.knn_idx = raw[:, :-1]
+        gp.knn_idz = raw[:, 1:]
+
     else:
-        raise ValueError(f"Unknown kernel: {kernel_name}")
+        from gpzoo.gp import SVGP, MGGP_SVGP
+        from gpzoo.modules import CholeskyParameter
 
-    gp = MGGP_LCGP(
-        mggp_kernel, dim=1, M=M, jitter=jitter,
-        n_groups=n_groups, K=K,
-    )
+        M = config.model.get("num_inducing", 800)
+        cholesky_mode = config.model.get("cholesky_mode", "exp")
 
-    Z_init = X.unsqueeze(-1).clone()
-    gp.Z = nn.Parameter(Z_init, requires_grad=False)
+        if groups:
+            gp = MGGP_SVGP(
+                input_kernel, dim=1, M=M, jitter=jitter,
+                n_groups=n_groups, cholesky_mode=cholesky_mode, diagonal_only=False,
+            )
+        else:
+            gp = SVGP(
+                input_kernel, dim=1, M=M, jitter=jitter,
+                cholesky_mode=cholesky_mode, diagonal_only=False,
+            )
 
-    if C is not None:
-        groupsZ = _init_groupsZ(Z_init, X, C)
-        gp.groupsZ = nn.Parameter(groupsZ, requires_grad=False)
-    else:
-        groupsZ = None
+        x_min, x_max = X.min().item(), X.max().item()
+        padding = (x_max - x_min) * 0.02
+        Z_init = torch.linspace(x_min + padding, x_max - padding, M).unsqueeze(-1)
+        gp.Z = nn.Parameter(Z_init, requires_grad=False)
 
-    domain_range = (float(X.min()), float(X.max()))
-    R = estimate_lcgp_rank(ls, domain_range, dim=1, p=0.99)
-    R = max(1, min(R, 250))
-    
-    del gp.Lu
-    gp.Lu = nn.Parameter(torch.randn(L, M, R) * (1.0 / R ** 0.5))
-    gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
+        if groups:
+            groupsZ = _init_groupsZ(Z_init, X, C)
+            gp.groupsZ = nn.Parameter(groupsZ, requires_grad=False)
 
-    raw = calculate_knn(
-        gp, Z_init, strategy=neighbors,
-        multigroup=True,
-        groupsX=groupsZ, groupsZ=groupsZ,
-    )
-    gp.knn_idx = raw[:, :-1]
-    gp.knn_idz = raw[:, 1:]
+        del gp.Lu
+        gp.Lu = CholeskyParameter((L, M), mode=cholesky_mode, diagonal_only=False)
+        gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
 
+    # --- 3. ChromGP wrapper ---
     output_kernel = batched_RBF(sigma=sigma, lengthscale=out_ls)
     model = ChromGP(gp, output_kernel, noise=noise, jitter=jitter)
 
-    mggp_kernel.sigma.requires_grad = False
-    mggp_kernel.group_diff_param.requires_grad = False
+    # --- 4. Freeze kernel hyperparams ---
+    input_kernel.sigma.requires_grad = False
+    if hasattr(input_kernel, "group_diff_param"):
+        input_kernel.group_diff_param.requires_grad = False
     if not config.model.get("train_lengthscale", False):
-        mggp_kernel.lengthscale.requires_grad = False
+        input_kernel.lengthscale.requires_grad = False
     output_kernel.sigma.requires_grad = False
     output_kernel.lengthscale.requires_grad = False
 
     return model
-
-# Keep old name as alias for backward compat with any external callers
-build_model = build_model_svgp
 
 
 def run(config_path: str, resume: bool = False, video: bool = False):
@@ -398,31 +264,21 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     print(f"Device: {device}")
 
     # --- Build model ---
-    M = config.model.get("num_inducing", 800)
     L = config.model.get("n_components", 3)
     prior_type = config.model.get("prior", "SVGP").upper()
-
+    model = build_model(
+        config, X=data.X,
+        C=data.C if use_groups else None,
+        n_groups=data.n_groups if use_groups else 1,
+    )
+    _variant = ("MGGP_" if use_groups else "") + prior_type
+    _size = f"N={N}" if prior_type == "LCGP" else f"M={config.model.get('num_inducing', 800)}"
+    _grp = f", G={data.n_groups}" if use_groups else ""
+    print(f"Model: ChromGP + {_variant}  ({_size}, L={L}{_grp})")
     if use_groups:
-        if prior_type == "LCGP":
-            model = build_model_mggp_lcgp(
-                config, X=data.X, C=data.C, n_groups=data.n_groups,
-            )
-            print(f"Model: ChromGP + MGGP_LCGP  (N={N}, L={L}, G={data.n_groups})")
-            print(f"  group_diff_param: {config.model.get('group_diff_param', 1.0)}")
-        else:
-            model = build_model_mggp_svgp(
-                config, X=data.X, C=data.C, n_groups=data.n_groups,
-            )
-            print(f"Model: ChromGP + MGGP_SVGP  (M={M}, L={L}, G={data.n_groups})")
-            print(f"  group_diff_param: {config.model.get('group_diff_param', 1.0)}")
-    else:
-        if prior_type == "LCGP":
-            model = build_model_lcgp(config, X=data.X)
-            print(f"Model: ChromGP + LCGP  (N={N}, L={L})")
-        else:
-            model = build_model_svgp(config, X=data.X)
-            print(f"Model: ChromGP + SVGP  (M={M}, L={L})")
+        print(f"  group_diff_param: {config.model.get('group_diff_param', 1.0)}")
 
+    M = model.gp.Z.shape[0]  # num_inducing (= N for LCGP, config value for SVGP)
     model = model.to(device)
     train_ls = config.model.get("train_lengthscale", False)
     print(f"  Input lengthscale: trainable={train_ls}")

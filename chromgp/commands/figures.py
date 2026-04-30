@@ -375,19 +375,12 @@ def run(config_path: str):
     model = None
     use_groups = config.groups
     if checkpoint_path.exists():
-        from ..commands.train import (build_model_svgp, build_model_mggp_svgp,
-                                       build_model_lcgp, build_model_mggp_lcgp)
-        prior_type = config.model.get("prior", "SVGP").upper()
-        if use_groups:
-            if prior_type == "LCGP":
-                model = build_model_mggp_lcgp(config, X=data.X, C=data.C, n_groups=data.n_groups)
-            else:
-                model = build_model_mggp_svgp(config, X=data.X, C=data.C, n_groups=data.n_groups)
-        else:
-            if prior_type == "LCGP":
-                model = build_model_lcgp(config, X=data.X)
-            else:
-                model = build_model_svgp(config, X=data.X)
+        from ..commands.train import build_model
+        model = build_model(
+            config, X=data.X,
+            C=data.C if use_groups else None,
+            n_groups=data.n_groups if use_groups else 1,
+        )
         model = model.to(device)
         ckpt = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(ckpt["model_state_dict"])
