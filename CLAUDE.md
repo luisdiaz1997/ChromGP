@@ -64,6 +64,18 @@ When changing the model contract, the forward signature `(pY, qZ, qU, pU)` and t
 
 Generates ground-truth 3D shapes (`make_helix`, plus cylinder/spiral/sponge variants in notebooks), produces noisy replicate point clouds with `generate_simulations`, converts distance matrices to contact maps via a Poisson distance-decay model in `compute_contacts`, and renders side-by-side 3D-trajectory + reconstructed-distance + true-distance MP4 animations via `create_animation`.
 
+### ChromHMM state grouping
+
+Fine-grained ChromHMM states are merged into 5 coarse biological groups **before** bin-majority assignment (in `hic.py`, via `chromhmm.merge_chromhmm_groups`). This reduces extreme Quiescent imbalance and makes minority groups more interpretable.
+
+| Group           | States included                                                              |
+|-----------------|------------------------------------------------------------------------------|
+| Active          | Tss, TssFlnk, TssFlnkD, TssFlnkU, Enh1, Enh2, EnhG1, EnhG2, TssA, EnhA1, EnhA2, EnhWk |
+| Transcribed     | Tx, TxWk                                                                    |
+| Heterochromatin | Het, ZNF/Rpts                                                               |
+| Polycomb        | ReprPC, ReprPCWk, Biv, TssBiv, EnhBiv                                      |
+| Quiescent       | Quies (and any unmapped states)                                             |
+
 ### Notebooks
 
 ## Git conventions

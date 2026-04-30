@@ -64,7 +64,16 @@ def plot_elbo(elbo_history: np.ndarray, output_path: Path) -> None:
 # Final 3D reconstruction figure — 3-panel: structure | recon | observed
 # ---------------------------------------------------------------------------
 
-# Distinct colors for up to 15 chromHMM states (colorbrewer-inspired)
+# Fixed semantic colors for the 5 coarse ChromHMM groups
+_COARSE_GROUP_COLORS: dict[str, str] = {
+    "Active":          "#e41a1c",  # red    — promoters/enhancers
+    "Transcribed":     "#4daf4a",  # green  — gene bodies
+    "Heterochromatin": "#984ea3",  # purple — constitutive heterochromatin
+    "Polycomb":        "#377eb8",  # blue   — polycomb repressed
+    "Quiescent":       "#999999",  # gray   — inactive
+}
+
+# Fallback palette for generic / non-coarse group labels
 _STATE_COLORS = [
     "#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00",
     "#ffff33", "#a65628", "#f781bf", "#999999", "#66c2a5",
@@ -72,10 +81,20 @@ _STATE_COLORS = [
 ]
 
 
-def _get_group_colors(C: np.ndarray) -> np.ndarray:
-    """Map integer group labels to hex color strings."""
-    n_groups = int(C.max()) + 1
-    colors = _STATE_COLORS[:n_groups]
+def _get_group_colors(C: np.ndarray, group_names: list | None = None) -> np.ndarray:
+    """Map integer group labels to hex color strings.
+
+    Uses semantic colors when group_names are the 5 coarse ChromHMM groups,
+    otherwise falls back to the generic _STATE_COLORS palette.
+    """
+    if group_names is not None:
+        colors = [
+            _COARSE_GROUP_COLORS.get(name, _STATE_COLORS[i % len(_STATE_COLORS)])
+            for i, name in enumerate(group_names)
+        ]
+    else:
+        n_groups = int(C.max()) + 1
+        colors = _STATE_COLORS[:n_groups]
     return np.array(colors)[C.astype(int)]
 
 
@@ -110,11 +129,24 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
     ax3 = fig.add_subplot(1, 3, 3)
 
     # --- Panel 1: 3D structure ---
-    # Line plot connecting genomic bins in order (notebook convention).
-    # This shows the chromatin fiber as a continuous 3D curve.
-    ax1.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=1.0)
+    ax1.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.5, zorder=1)
+    if C is not None:
+        bin_colors = _get_group_colors(C, group_names)
+        ax1.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=2.0,
+                    alpha=0.85, edgecolors="none", zorder=2)
+        # Legend
+        legend_elements = [
+            plt.Line2D([0], [0], marker="o", color="w",
+                       markerfacecolor=_COARSE_GROUP_COLORS.get(
+                           group_names[g] if group_names else "",
+                           _STATE_COLORS[g % len(_STATE_COLORS)]),
+                       markersize=5,
+                       label=group_names[g] if group_names else f"Group {g}")
+            for g in range(int(C.max()) + 1)
+        ]
+        ax1.legend(handles=legend_elements, loc="upper left", fontsize=5,
+                   framealpha=0.7, handlelength=0.8)
     ax1.view_init(elev=20, azim=-100)
-
     ax1.set_title("3D Chromatin Structure", fontsize=12)
 
     # --- Panel 2: Reconstructed distances ---
@@ -179,6 +211,9 @@ def create_training_animation(
 
     s = 3.0 if N < 15000 else 100.0 / np.sqrt(N)
 
+    # Pre-compute group colors once (reused across frames)
+    bin_colors_anim = _get_group_colors(C, group_names) if C is not None else None
+
     fig = plt.figure(figsize=(18, 5))
     ax1 = fig.add_subplot(1, 3, 1, projection="3d")
     ax2 = fig.add_subplot(1, 3, 2)
@@ -204,7 +239,12 @@ def create_training_animation(
         it = frame_iters[frame_indices[fi]]
 
         # --- 3D structure ---
-        ax1.plot(z[:, 0], z[:, 1], z[:, 2], lw=1.0)
+        ax1.plot(z[:, 0], z[:, 1], z[:, 2], lw=0.6, color="lightgray", alpha=0.5, zorder=1)
+        if bin_colors_anim is not None:
+            ax1.scatter(z[:, 0], z[:, 1], z[:, 2], c=bin_colors_anim, s=1.5,
+                        alpha=0.8, edgecolors="none", zorder=2)
+        else:
+            ax1.plot(z[:, 0], z[:, 1], z[:, 2], lw=1.5)
         ax1.view_init(elev=20, azim=-100)
         ax1.set_title(f"3D Structure (iter {it})", fontsize=12)
 
@@ -273,7 +313,7 @@ def plot_groupwise_coordinates(
 
     fig = plt.figure(figsize=(panel_size * ncols, panel_size * nrows))
 
-    bin_colors = _get_group_colors(C)  # (N,) hex strings by actual group
+    bin_colors = _get_group_colors(C, group_names)  # (N,) hex strings by actual group
 
     # Compute shared cubic bounding box across all panels so sizes are comparable
     all_Z = np.vstack([Z_uncond] + list(groupwise_positions.values()))
@@ -309,9 +349,11 @@ def plot_groupwise_coordinates(
     # Legend: one colored dot per group
     legend_elements = [
         plt.Line2D([0], [0], marker="o", color="w",
-                   markerfacecolor=_STATE_COLORS[g % len(_STATE_COLORS)],
+                   markerfacecolor=_COARSE_GROUP_COLORS.get(
+                       group_names[g] if group_names else "",
+                       _STATE_COLORS[g % len(_STATE_COLORS)]),
                    markersize=5, label=group_names[g] if group_names else f"Group {g}")
-        for g in range(min(n_groups, len(_STATE_COLORS)))
+        for g in range(n_groups)
     ]
     fig.legend(handles=legend_elements, loc="lower right",
                fontsize=6, ncol=2, framealpha=0.8)
@@ -324,10 +366,118 @@ def plot_groupwise_coordinates(
 
 
 # ---------------------------------------------------------------------------
+# Groupwise reconstructions — 3D + distance matrix per group
+# ---------------------------------------------------------------------------
+
+def plot_groupwise_reconstructions(
+    Z_uncond: np.ndarray,
+    groupwise_positions: dict,
+    C: np.ndarray,
+    group_names: list,
+    valid_mask: np.ndarray | None,
+    output_path: Path,
+    panel_size: float = 3.5,
+) -> None:
+    """2-row grid: 3D structure (top) + reconstructed distances (bottom) per group.
+
+    Columns: Unconditional + one per ChromHMM group (same order as
+    groupwise_coordinates). Top row uses a shared cubic bounding box;
+    bottom row uses a shared color range across all panels for direct
+    visual comparison of pairwise distance scales.
+
+    Args:
+        Z_uncond: (N, 3) unconditional posterior mean positions.
+        groupwise_positions: {g: (N, 3)} conditional posterior per group.
+        C: (N,) integer group labels for coloring scatter dots.
+        group_names: List of G group name strings.
+        valid_mask: Optional (N_full,) bool to expand reconstruction with NaN gaps.
+        output_path: Where to save the figure.
+        panel_size: Width/height of each column in inches.
+    """
+    n_groups = len(groupwise_positions)
+    n_cols = 1 + n_groups  # unconditional + one per group
+
+    # Ordered list of (positions, title) for all columns
+    all_structures = [(Z_uncond, "Unconditional")] + [
+        (
+            groupwise_positions[g],
+            group_names[g] if group_names and g < len(group_names) else f"Group {g}",
+        )
+        for g in sorted(groupwise_positions.keys())
+    ]
+
+    # Shared cubic bounding box (same scale across all 3D panels)
+    all_Z = np.vstack([Z for Z, _ in all_structures])
+    centers = (all_Z.max(axis=0) + all_Z.min(axis=0)) / 2
+    half_span = (all_Z.max(axis=0) - all_Z.min(axis=0)).max() / 2 * 1.05
+    lims = [(centers[i] - half_span, centers[i] + half_span) for i in range(3)]
+
+    # Pre-compute reconstruction matrices for shared color range
+    recon_mats = []
+    for Z, _ in all_structures:
+        Z_t = torch.tensor(Z)
+        recon = torch.cdist(Z_t, Z_t).numpy()
+        if valid_mask is not None:
+            recon = _expand_to_full(recon, valid_mask)
+        recon_mats.append(recon)
+
+    valid_vals = np.concatenate([m[~np.isnan(m)].ravel() for m in recon_mats])
+    vmin, vmax = float(valid_vals.min()), float(valid_vals.max())
+
+    bin_colors = _get_group_colors(C, group_names)
+
+    fig = plt.figure(figsize=(panel_size * n_cols, panel_size * 2))
+
+    for col_i, ((Z, title), recon_mat) in enumerate(zip(all_structures, recon_mats)):
+        subplot_col = col_i + 1  # 1-indexed
+
+        # Top row: 3D structure
+        ax3d = fig.add_subplot(2, n_cols, subplot_col, projection="3d")
+        ax3d.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.5, zorder=1)
+        ax3d.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=1.5,
+                     alpha=0.8, edgecolors="none", zorder=2)
+        ax3d.set_xlim(*lims[0])
+        ax3d.set_ylim(*lims[1])
+        ax3d.set_zlim(*lims[2])
+        ax3d.set_title(title, fontsize=7, pad=2)
+        ax3d.set_xticks([])
+        ax3d.set_yticks([])
+        ax3d.set_zticks([])
+        ax3d.view_init(elev=20, azim=-100)
+
+        # Bottom row: reconstruction distance matrix
+        ax2d = fig.add_subplot(2, n_cols, n_cols + subplot_col)
+        im = ax2d.matshow(recon_mat, cmap="YlOrRd_r", aspect="auto", vmin=vmin, vmax=vmax)
+        ax2d.set_xticks([])
+        ax2d.set_yticks([])
+        plt.colorbar(im, ax=ax2d, fraction=0.046, pad=0.04)
+
+    # Legend: group colors
+    legend_elements = [
+        plt.Line2D([0], [0], marker="o", color="w",
+                   markerfacecolor=_COARSE_GROUP_COLORS.get(
+                       group_names[g] if group_names else "",
+                       _STATE_COLORS[g % len(_STATE_COLORS)]),
+                   markersize=5,
+                   label=group_names[g] if group_names else f"Group {g}")
+        for g in range(n_groups)
+    ]
+    fig.legend(handles=legend_elements, loc="lower right",
+               fontsize=6, ncol=2, framealpha=0.8)
+
+    fig.suptitle("Groupwise Conditional 3D Structures and Reconstructions",
+                 fontsize=10, y=1.01)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {output_path}")
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def run(config_path: str):
+def run(config_path: str, animation: bool = False):
     """Generate all figures for a trained model.
 
     Reads elbo_history.csv, trajectory.npz (or legacy trajectory.npy),
@@ -335,7 +485,7 @@ def run(config_path: str):
 
         figures/elbo_curve.png
         figures/reconstruction.png
-        figures/training_animation.gif
+        figures/training_animation.gif  (only with --animation)
     """
     import torch.nn as nn
     import pandas as pd
@@ -407,72 +557,75 @@ def run(config_path: str):
                           valid_mask=valid_mask_np,
                           output_path=figures_dir / "reconstruction.png")
 
-    # --- Training animation ---
-    traj_npz = output_dir / "checkpoints" / "trajectory.npz"
-    traj_npy = output_dir / "checkpoints" / "trajectory.npy"
-    Zs_stack = None
-    frame_iters = None
+    # --- Training animation (only with --animation) ---
+    if animation:
+        traj_npz = output_dir / "checkpoints" / "trajectory.npz"
+        traj_npy = output_dir / "checkpoints" / "trajectory.npy"
+        Zs_stack = None
+        frame_iters = None
 
-    if traj_npz.exists():
-        print("Loading compact trajectory (mu + lengthscale)...")
-        traj = np.load(traj_npz)
-        traj_mus = traj["mu"]
-        traj_steps = traj["steps"]
-        traj_ls = traj.get("lengthscale", None)
+        if traj_npz.exists():
+            print("Loading compact trajectory (mu + lengthscale)...")
+            traj = np.load(traj_npz)
+            traj_mus = traj["mu"]
+            traj_steps = traj["steps"]
+            traj_ls = traj.get("lengthscale", None)
 
-        n_frames, L_traj, M_traj = traj_mus.shape
-        print(f"  {n_frames} frames, mu shape=({L_traj}, {M_traj})")
+            n_frames, L_traj, M_traj = traj_mus.shape
+            print(f"  {n_frames} frames, mu shape=({L_traj}, {M_traj})")
 
-        if L_traj == 3 and model is not None:
-            train_ls = config.model.get("train_lengthscale", False)
-            X_dev = data.X.to(device)
+            if L_traj == 3 and model is not None:
+                train_ls = config.model.get("train_lengthscale", False)
+                X_dev = data.X.to(device)
 
-            print("  Reconstructing 3D positions from mu snapshots...")
-            Zs_frames = []
-            for fi in range(n_frames):
-                model.gp.mu = nn.Parameter(
-                    torch.from_numpy(traj_mus[fi]).float().to(device)
-                )
-                if train_ls and traj_ls is not None:
-                    model.gp.kernel.lengthscale = nn.Parameter(
-                        torch.tensor(float(traj_ls[fi]), device=device)
+                print("  Reconstructing 3D positions from mu snapshots...")
+                Zs_frames = []
+                for fi in range(n_frames):
+                    model.gp.mu = nn.Parameter(
+                        torch.from_numpy(traj_mus[fi]).float().to(device)
                     )
-                with torch.no_grad():
-                    qZ_i, _, _ = model.gp(X_dev, **gp_kwargs)
-                    Zs_frames.append(qZ_i.mean.T.cpu().numpy())
+                    if train_ls and traj_ls is not None:
+                        model.gp.kernel.lengthscale = nn.Parameter(
+                            torch.tensor(float(traj_ls[fi]), device=device)
+                        )
+                    with torch.no_grad():
+                        qZ_i, _, _ = model.gp(X_dev, **gp_kwargs)
+                        Zs_frames.append(qZ_i.mean.T.cpu().numpy())
 
-            Zs_stack = np.stack(Zs_frames)
-            frame_iters = list(traj_steps)
-            print(f"  Reconstructed: {Zs_stack.shape}")
-        else:
-            print(f"  Skipping: need 3D latent space and checkpoint")
+                Zs_stack = np.stack(Zs_frames)
+                frame_iters = list(traj_steps)
+                print(f"  Reconstructed: {Zs_stack.shape}")
+            else:
+                print(f"  Skipping: need 3D latent space and checkpoint")
 
-    elif traj_npy.exists():
-        traj = np.load(traj_npy, allow_pickle=True)
-        if traj.dtype == object:
-            Zs_stack = np.stack(traj.tolist())
+        elif traj_npy.exists():
+            traj = np.load(traj_npy, allow_pickle=True)
+            if traj.dtype == object:
+                Zs_stack = np.stack(traj.tolist())
+            else:
+                Zs_stack = traj
+            n_frames, N_traj, L_traj = Zs_stack.shape
+            print(f"Legacy trajectory: {n_frames} frames, {N_traj} bins x {L_traj} dims")
+            if L_traj == 3 and N_traj == N:
+                total_steps = int(config.training.get("max_iter", 1000))
+                frame_iters = list(range(0, total_steps + 1, 100))[:n_frames]
+            else:
+                print(f"  Skipping: shape mismatch (expected {N} bins, 3D)")
+                Zs_stack = None
         else:
-            Zs_stack = traj
-        n_frames, N_traj, L_traj = Zs_stack.shape
-        print(f"Legacy trajectory: {n_frames} frames, {N_traj} bins x {L_traj} dims")
-        if L_traj == 3 and N_traj == N:
-            total_steps = int(config.training.get("max_iter", 1000))
-            frame_iters = list(range(0, total_steps + 1, 100))[:n_frames]
-        else:
-            print(f"  Skipping: shape mismatch (expected {N} bins, 3D)")
-            Zs_stack = None
+            print("  No trajectory found.")
+
+        if Zs_stack is not None and frame_iters is not None:
+            n_frames = Zs_stack.shape[0]
+            gif_step = max(1, n_frames // 100)
+            create_training_animation(
+                Zs_stack, Y_observed, X, C, group_names, frame_iters,
+                figures_dir / "training_animation.gif",
+                valid_mask=valid_mask_np,
+                step=gif_step, fps=10,
+            )
     else:
-        print("  No trajectory found.")
-
-    if Zs_stack is not None and frame_iters is not None:
-        n_frames = Zs_stack.shape[0]
-        gif_step = max(1, n_frames // 100)
-        create_training_animation(
-            Zs_stack, Y_observed, X, C, group_names, frame_iters,
-            figures_dir / "training_animation.gif",
-            valid_mask=valid_mask_np,
-            step=gif_step, fps=10,
-        )
+        print("  Skipping training animation (use --animation to generate).")
 
     # --- Groupwise coordinates (reads analyze output) ---
     gw_dir = output_dir / "groupwise_positions"
@@ -489,7 +642,12 @@ def run(config_path: str):
                 Z_uncond, groupwise_positions, C, group_names,
                 figures_dir / "groupwise_coordinates.png",
             )
+            plot_groupwise_reconstructions(
+                Z_uncond, groupwise_positions, C, group_names,
+                valid_mask=valid_mask_np,
+                output_path=figures_dir / "groupwise_reconstructions.png",
+            )
     else:
-        print("  Skipping groupwise_coordinates.png — run analyze first.")
+        print("  Skipping groupwise figures — run analyze first.")
 
     print("\nFigures complete.")

@@ -11,6 +11,71 @@ import pandas as pd
 import torch
 
 
+# Mapping from raw ChromHMM state codes to 5 coarse biological groups.
+# Applied before bin-majority assignment so overlaps are merged first.
+#
+# Group       | States
+# ------------|--------------------------------------------------------
+# Active      | Active TSS, TSS Flanking, Upstream/Downstream Flank,
+#             | Active Enhancer 1/2, Genic Enhancer G1/G2
+# Transcribed | Transcribed, Weak Transcribed
+# Heterochromatin | Heterochromatin, ZNF/Repeats
+# Polycomb    | Polycomb Repressed, Bivalent
+# Quiescent   | Quiescent
+CHROMHMM_MERGE_MAP: dict[str, str] = {
+    # Active regulatory
+    'Tss':      'Active',
+    'TssFlnk':  'Active',
+    'TssFlnkD': 'Active',
+    'TssFlnkU': 'Active',
+    'Enh1':     'Active',
+    'Enh2':     'Active',
+    'EnhG1':    'Active',
+    'EnhG2':    'Active',
+    # 18-state equivalents
+    'TssA':     'Active',
+    'EnhA1':    'Active',
+    'EnhA2':    'Active',
+    'EnhWk':    'Active',
+    # Transcribed
+    'Tx':       'Transcribed',
+    'TxWk':     'Transcribed',
+    # Heterochromatin
+    'Het':          'Heterochromatin',
+    'ZNF/Rpts':     'Heterochromatin',
+    # Polycomb / repressed
+    'ReprPC':   'Polycomb',
+    'ReprPCWk': 'Polycomb',
+    'Biv':      'Polycomb',
+    'TssBiv':   'Polycomb',
+    'EnhBiv':   'Polycomb',
+    # Quiescent
+    'Quies':    'Quiescent',
+}
+
+
+def merge_chromhmm_groups(chromhmm_df: pd.DataFrame) -> pd.DataFrame:
+    """Replace fine-grained state codes with 5 coarse biological groups.
+
+    Unknown states fall back to 'Quiescent'. Call this before
+    assign_chromhmm_states so the bin-majority overlap operates on
+    merged groups rather than individual states.
+
+    Parameters
+    ----------
+    chromhmm_df : pd.DataFrame
+        ChromHMM annotations with columns: chrom, start, end, state.
+
+    Returns
+    -------
+    pd.DataFrame
+        Same structure but 'state' column replaced with coarse group name.
+    """
+    df = chromhmm_df.copy()
+    df['state'] = df['state'].map(CHROMHMM_MERGE_MAP).fillna('Quiescent')
+    return df
+
+
 # Descriptive names for ChromHMM states (for pretty figures/labels)
 _STATE_DESCRIPTIONS = {
     # 15-state model

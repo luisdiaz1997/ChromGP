@@ -1,11 +1,11 @@
-name: GM12878_chr14
+name: GM12878_chr14_10k
 seed: 67
 dataset: 4DNFIXP4QG5B
-output_dir: outputs/4DNFIXP4QG5B
+output_dir: outputs/4DNFIXP4QG5B_10k
 
 preprocessing:
   mcool_path: /gladstone/engelhardt/lab/lchumpitaz/hi-c/mcools/4DNFIXP4QG5B.mcool
-  resolution: 25000
+  resolution: 10000
   region: chr14
   balance: true
   contact_transform: log10
@@ -24,7 +24,7 @@ model:
   output_lengthscale: 1.0
   sigma: 1.0
   train_lengthscale: true
-  num_inducing: 800
+  num_inducing: 1500
   cholesky_mode: exp
   scale_kl_NM: true
   scale: 10000

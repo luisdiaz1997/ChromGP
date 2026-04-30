@@ -1,4 +1,4 @@
-name: GM12878_chr14
+name: GM12878_chr19
 seed: 67
 dataset: 4DNFIXP4QG5B
 output_dir: outputs/4DNFIXP4QG5B
@@ -6,7 +6,7 @@ output_dir: outputs/4DNFIXP4QG5B
 preprocessing:
   mcool_path: /gladstone/engelhardt/lab/lchumpitaz/hi-c/mcools/4DNFIXP4QG5B.mcool
   resolution: 25000
-  region: chr14
+  region: chr19
   balance: true
   contact_transform: log10
   num_replicates: 1

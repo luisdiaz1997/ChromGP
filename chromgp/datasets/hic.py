@@ -127,6 +127,7 @@ class HiCLoader:
                 raise ValueError("chromhmm_bed path required when groups_by == 'chromhmm_state'")
 
             chromhmm_df = chromhmm.load_chromhmm_bed(chromhmm_bed, state_whitelist)
+            chromhmm_df = chromhmm.merge_chromhmm_groups(chromhmm_df)
             C = chromhmm.assign_chromhmm_states(bin_coords, chromhmm_df)
             group_names = chromhmm.get_state_names(chromhmm_df)
             n_groups = len(group_names)
