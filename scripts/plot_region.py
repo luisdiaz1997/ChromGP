@@ -168,10 +168,11 @@ def main():
 
     # Panel 0 — Hi-C contact map (top 7/9)
     ax0 = plt.subplot(gs[:7, :])
-    # Replace NaN with 0 for log10 display (shows as lowest color)
-    mat_display = np.nan_to_num(mat, nan=0.0)
-    im = ax0.matshow(np.log10(mat_display + 5e-6), cmap='YlOrRd',
-                     aspect='auto', interpolation='none')
+    mat_masked = np.ma.masked_invalid(mat)
+    mat_log = np.ma.log10(mat_masked + 5e-6)
+    cmap = plt.cm.YlOrRd.copy()
+    cmap.set_bad('0.12')
+    im = ax0.matshow(mat_log, cmap=cmap, aspect='auto', interpolation='none')
 
     ticks = ax0.get_xticks()
     # Clamp ticks to valid bin range

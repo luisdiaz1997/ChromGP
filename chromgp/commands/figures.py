@@ -66,6 +66,14 @@ def plot_elbo(elbo_history: np.ndarray, output_path: Path) -> None:
 # Final 3D reconstruction figure — 3-panel: structure | recon | observed
 # ---------------------------------------------------------------------------
 
+def _dark_nans(mat, cmap_name="YlOrRd"):
+    """Wrap matrix in masked array with dark NaN rendering."""
+    masked = np.ma.masked_invalid(mat)
+    cmap = plt.cm.get_cmap(cmap_name).copy()
+    cmap.set_bad("0.12")
+    return masked, cmap
+
+
 # Fixed semantic colors for the 5 coarse ChromHMM groups
 _COARSE_GROUP_COLORS: dict[str, str] = {
     "Active":          "#e41a1c",  # red    — promoters/enhancers
@@ -235,13 +243,15 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
     recon_dist = torch.cdist(Z_t, Z_t).numpy()
     if valid_mask is not None:
         recon_dist = _expand_to_full(recon_dist, valid_mask)
-    im2 = ax2.matshow(recon_dist, cmap="YlOrRd_r", aspect="auto")
+    masked, cmap = _dark_nans(recon_dist, "YlOrRd_r")
+    im2 = ax2.matshow(masked, cmap=cmap, aspect="auto")
     if C is None:
         ax2.set_title("Reconstructed Distances", fontsize=12)
 
     # --- Panel 3: Observed data ---
     Y_obs = np.log10(Y + 5e-6)
-    im3 = ax3.matshow(Y_obs, cmap="YlOrRd", aspect="auto")
+    Y_masked, cmap_obs = _dark_nans(Y_obs, "YlOrRd")
+    im3 = ax3.matshow(Y_masked, cmap=cmap_obs, aspect="auto")
     if C is None:
         ax3.set_title("Observed Contact Matrix", fontsize=12)
 
@@ -327,7 +337,8 @@ def create_training_animation(
 
     # Static observed matrix (panel 3)
     Y_obs = np.log10(Y + 5e-6)
-    ax3.matshow(Y_obs, cmap="YlOrRd", aspect="auto")
+    Y_masked, cmap_obs = _dark_nans(Y_obs, "YlOrRd")
+    ax3.matshow(Y_masked, cmap=cmap_obs, aspect="auto")
     ax3.set_title("Observed Contact Matrix", fontsize=12)
 
     # Fixed palette: 253 turbo + gray + white + black (SF convention)
@@ -359,7 +370,8 @@ def create_training_animation(
         recon = torch.cdist(Z_t, Z_t).numpy()
         if valid_mask is not None:
             recon = _expand_to_full(recon, valid_mask)
-        ax2.matshow(recon, cmap="YlOrRd_r", aspect="auto")
+        recon_masked, cmap_r = _dark_nans(recon, "YlOrRd_r")
+        ax2.matshow(recon_masked, cmap=cmap_r, aspect="auto")
         ax2.set_title("Reconstructed Distances", fontsize=12)
 
         fig.canvas.draw()
@@ -580,7 +592,8 @@ def plot_groupwise_reconstructions(
 
         # Reconstruction matrix — no colorbar here so its width is never stolen
         ax2d = fig.add_subplot(gs[2, 2 * col_i + 1])
-        last_im = ax2d.matshow(recon_mat, cmap="YlOrRd_r", aspect="auto", vmin=vmin, vmax=vmax)
+        recon_masked, cmap_r = _dark_nans(recon_mat, "YlOrRd_r")
+        last_im = ax2d.matshow(recon_masked, cmap=cmap_r, aspect="auto", vmin=vmin, vmax=vmax)
         if resolution is not None:
             _set_genomic_ticks(ax2d, recon_mat.shape[0], resolution, start_bp)
         else:
