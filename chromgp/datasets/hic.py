@@ -82,6 +82,7 @@ class HiCLoader:
         good_rows = ~np.isnan(matrix).all(axis=1)
         good_cols = ~np.isnan(matrix).all(axis=0)
         keep = good_rows & good_cols
+        valid_mask = torch.from_numpy(keep)
         matrix = matrix[np.ix_(keep, keep)]
 
         # Impute remaining sparse NaNs to 0
@@ -158,6 +159,7 @@ class HiCLoader:
             gc=gc,
             contact_raw=contact_raw,
             contact_raw_full=contact_raw_full,
+            valid_mask=valid_mask,
             bin_coords=bin_coords,
             metadata=metadata,
         )

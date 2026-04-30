@@ -20,13 +20,14 @@ model:
   n_components: 3
   E: 1
   kernel: Matern32
-  lengthscale: 5000000.0
+  lengthscale: 400.0
   output_lengthscale: 1.0
   sigma: 1.0
   train_lengthscale: true
   num_inducing: 800
   cholesky_mode: exp
   scale_kl_NM: true
+  scale: 10000
   noise: 0.1
   jitter: 1e-5
   integrated_force: false

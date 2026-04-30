@@ -79,9 +79,19 @@ def _get_group_colors(C: np.ndarray) -> np.ndarray:
     return np.array(colors)[C.astype(int)]
 
 
+def _expand_to_full(dense: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
+    """Expand (N,N) dense matrix to (N_full,N_full) with NaN in filtered positions."""
+    N_full = len(valid_mask)
+    full = np.full((N_full, N_full), np.nan)
+    idx = np.where(valid_mask)[0]
+    full[np.ix_(idx, idx)] = dense
+    return full
+
+
 def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
                         C: np.ndarray | None = None,
                         group_names: list | None = None,
+                        valid_mask: np.ndarray | None = None,
                         output_path: Path | None = None) -> None:
     """1x3 panel: 3D structure colored by group | reconstructed distances | observed.
 
@@ -91,6 +101,7 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
         Y: Observed distance/contact matrix (N, N).
         C: Optional group labels (N,).
         group_names: Optional group name strings.
+        valid_mask: Optional (N_full,) bool mask to expand reconstruction with NaN gaps.
         output_path: Where to save the figure.
     """
     fig = plt.figure(figsize=(18, 5))
@@ -109,6 +120,8 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
     # --- Panel 2: Reconstructed distances ---
     Z_t = torch.tensor(Z)
     recon_dist = torch.cdist(Z_t, Z_t).numpy()
+    if valid_mask is not None:
+        recon_dist = _expand_to_full(recon_dist, valid_mask)
     im2 = ax2.matshow(recon_dist, cmap="YlOrRd_r", aspect="auto")
     ax2.set_title("Reconstructed Distances", fontsize=12)
     plt.colorbar(im2, ax=ax2, fraction=0.046)
@@ -140,6 +153,7 @@ def create_training_animation(
     group_names: list | None,
     frame_iters: list,        # iteration numbers for each frame
     output_path: Path,
+    valid_mask: np.ndarray | None = None,  # (N_full,) bool to expand recon with NaN gaps
     step: int = 1,            # frame stride
     fps: int = 15,
 ) -> None:
@@ -155,6 +169,7 @@ def create_training_animation(
         group_names: Optional group name strings.
         frame_iters: Iteration number for each frame.
         output_path: Output .gif path.
+        valid_mask: Optional (N_full,) bool to expand reconstruction with NaN gaps.
         step: Frame stride (take every step-th frame).
         fps: Frames per second for output.
     """
@@ -196,6 +211,8 @@ def create_training_animation(
         # --- Reconstructed distances ---
         Z_t = torch.tensor(z)
         recon = torch.cdist(Z_t, Z_t).numpy()
+        if valid_mask is not None:
+            recon = _expand_to_full(recon, valid_mask)
         ax2.matshow(recon, cmap="YlOrRd_r", aspect="auto")
         ax2.set_title("Reconstructed Distances", fontsize=12)
 
@@ -326,6 +343,8 @@ def run(config_path: str):
 
     # --- Load data ---
     data = load_preprocessed(region_dir)          # shared preprocessed dir
+    scale = float(config.model.get("scale", 10000))
+    data.X = data.X / scale
     N = data.n_bins
     X = data.X.numpy()
     # Use full matrix with NaN gaps for observed panel (notebook convention)
@@ -337,6 +356,7 @@ def run(config_path: str):
         Y_observed = data.Y.numpy()
     C = data.C.numpy().astype(int) if data.C is not None else None
     group_names = data.group_names
+    valid_mask_np = data.valid_mask.numpy() if data.valid_mask is not None else None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print(f"Data: {data}")
@@ -383,7 +403,8 @@ def run(config_path: str):
             qZ, _, _ = model.gp(data.X.to(device), **gp_kwargs)
             Z_final = qZ.mean.T.cpu().numpy()  # (N, L)
         plot_reconstruction(Z_final, X, Y_observed, C, group_names,
-                          figures_dir / "reconstruction.png")
+                          valid_mask=valid_mask_np,
+                          output_path=figures_dir / "reconstruction.png")
 
     # --- Training animation ---
     traj_npz = output_dir / "checkpoints" / "trajectory.npz"
@@ -448,6 +469,7 @@ def run(config_path: str):
         create_training_animation(
             Zs_stack, Y_observed, X, C, group_names, frame_iters,
             figures_dir / "training_animation.gif",
+            valid_mask=valid_mask_np,
             step=gif_step, fps=10,
         )
 

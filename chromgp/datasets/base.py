@@ -43,6 +43,7 @@ class GenomicData:
     gc: Optional[torch.Tensor] = None  # (N,) GC fraction per bin
     contact_raw: Optional[torch.Tensor] = None  # (N, N) raw contacts (filtered)
     contact_raw_full: Optional[torch.Tensor] = None  # (N_full, N_full) raw contacts (pre-filter, with NaN gaps)
+    valid_mask: Optional[torch.Tensor] = None  # (N_full,) bool: True for bins kept through all filtering
     bin_coords: Optional[object] = None  # DataFrame with chrom, start, end
     metadata: dict = field(default_factory=dict)
 
@@ -67,6 +68,7 @@ class GenomicData:
             gc=self.gc.to(device) if self.gc is not None else None,
             contact_raw=self.contact_raw.to(device) if self.contact_raw is not None else None,
             contact_raw_full=self.contact_raw_full.to(device) if self.contact_raw_full is not None else None,
+            valid_mask=self.valid_mask,
             bin_coords=self.bin_coords,
             metadata=self.metadata,
         )

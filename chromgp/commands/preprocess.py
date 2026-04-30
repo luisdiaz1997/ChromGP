@@ -38,8 +38,25 @@ def _filter_nans(data: GenomicData) -> GenomicData:
     if n_removed > 0:
         print(f"  Removed {n_removed} bins with NaN values")
 
+    # Chain NaN mask onto the full-length valid_mask (which already has HiCLoader keep)
+    if data.valid_mask is not None:
+        full_mask = np.zeros(len(data.valid_mask), dtype=bool)
+        full_mask[data.valid_mask.numpy()] = mask
+        valid_mask = torch.from_numpy(full_mask)
+    else:
+        valid_mask = torch.from_numpy(mask)
+
     if mask.all():
-        return data
+        return GenomicData(
+            X=data.X, Y=data.Y, C=data.C,
+            n_groups=data.n_groups, group_names=data.group_names,
+            gc=data.gc,
+            contact_raw=data.contact_raw,
+            contact_raw_full=data.contact_raw_full,
+            valid_mask=valid_mask,
+            bin_coords=data.bin_coords,
+            metadata=data.metadata,
+        )
 
     t_mask = torch.from_numpy(mask)
     return GenomicData(
@@ -51,6 +68,7 @@ def _filter_nans(data: GenomicData) -> GenomicData:
         gc=data.gc[t_mask] if data.gc is not None else None,
         contact_raw=data.contact_raw[t_mask][:, t_mask] if data.contact_raw is not None else None,
         contact_raw_full=data.contact_raw_full,
+        valid_mask=valid_mask,
         bin_coords=data.bin_coords.iloc[mask].reset_index(drop=True) if data.bin_coords is not None else None,
         metadata=data.metadata,
     )
@@ -100,6 +118,8 @@ def run(config_path: str):
     np.save(output_dir / "contact_raw.npy", data.contact_raw.numpy())  # (N, N)
     if data.contact_raw_full is not None:
         np.save(output_dir / "contact_raw_full.npy", data.contact_raw_full.numpy())  # (N_full, N_full) with NaN gaps
+    if data.valid_mask is not None:
+        np.save(output_dir / "valid_mask.npy", data.valid_mask.numpy())  # (N_full,) bool
 
     # Save GC content per bin
     if data.gc is not None:

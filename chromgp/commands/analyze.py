@@ -68,7 +68,10 @@ def run(config_path: str):
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}. Run train first.")
 
     data = load_preprocessed(region_dir)
+    scale = float(config.model.get("scale", 10000))
+    data.X = data.X / scale
     print(f"Data: {data}")
+    print(f"  X scaled by 1/{scale:.0f} -> range [{data.X.min().item():.1f}, {data.X.max().item():.1f}]")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")

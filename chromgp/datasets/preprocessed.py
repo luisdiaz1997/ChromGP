@@ -52,6 +52,11 @@ def load_preprocessed(output_dir: Union[Path, str]) -> GenomicData:
     if (prep_dir / "contact_raw_full.npy").exists():
         contact_raw_full = torch.from_numpy(np.load(prep_dir / "contact_raw_full.npy"))
 
+    # Load valid-bin mask (N_full bool, True = bin survived all filtering)
+    valid_mask = None
+    if (prep_dir / "valid_mask.npy").exists():
+        valid_mask = torch.from_numpy(np.load(prep_dir / "valid_mask.npy"))
+
     # Load groups if present
     C = None
     n_groups = 0
@@ -73,5 +78,6 @@ def load_preprocessed(output_dir: Union[Path, str]) -> GenomicData:
         gc=gc,
         contact_raw=contact_raw,
         contact_raw_full=contact_raw_full,
+        valid_mask=valid_mask,
         metadata=meta,
     )

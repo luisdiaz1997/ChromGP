@@ -59,6 +59,7 @@ class Config:
         "cholesky_mode": "exp",
         "noise": 0.1,
         "jitter": 1e-5,
+        "scale": 10000,
         "integrated_force": False,
         "scale_kl_NM": True,
         "K": 50,

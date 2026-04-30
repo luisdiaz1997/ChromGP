@@ -34,6 +34,7 @@ SPATIAL_MODEL_FIELDS = {
     "train_lengthscale",
     "noise",
     "jitter",
+    "scale",
     "integrated_force",
 }
 

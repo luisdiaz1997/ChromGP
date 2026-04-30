@@ -244,7 +244,7 @@ def build_model_lcgp(config: Config, X: torch.Tensor) -> nn.Module:
 
     # Initialize Lu as raw nn.Parameter
     domain_range = (float(X.min()), float(X.max()))
-    R = estimate_lcgp_rank(ls, domain_range, dim=1, p=0.9)
+    R = estimate_lcgp_rank(ls, domain_range, dim=1, p=0.99)
     R = max(1, min(R, 250))
     
     del gp.Lu
@@ -321,7 +321,7 @@ def build_model_mggp_lcgp(
         groupsZ = None
 
     domain_range = (float(X.min()), float(X.max()))
-    R = estimate_lcgp_rank(ls, domain_range, dim=1, p=0.9)
+    R = estimate_lcgp_rank(ls, domain_range, dim=1, p=0.99)
     R = max(1, min(R, 250))
     
     del gp.Lu
@@ -375,7 +375,12 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     data = load_preprocessed(region_dir)          # shared preprocessed dir
     N = data.n_bins
     D = data.n_features
+
+    # Scale genomic coordinates to avoid float32 precision issues
+    scale = float(config.model.get("scale", 10000))
+    data.X = data.X / scale
     print(f"Data: {data}")
+    print(f"  X scaled by 1/{scale:.0f} -> range [{data.X.min().item():.1f}, {data.X.max().item():.1f}]")
 
     use_groups = config.groups
     if use_groups and data.C is None:
