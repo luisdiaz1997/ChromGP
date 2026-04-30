@@ -111,10 +111,15 @@ def build_model(
 
     # --- 1. Input kernel ---
     if groups:
-        from gpzoo.kernels import batched_MGGP_RBF, batched_MGGP_Matern32
+        from gpzoo.kernels import batched_MGGP_RBF, batched_MGGP_Matern32, batched_MGGP_Matern52
         group_diff_param = float(config.model.get("group_diff_param", 1.0))
         if kernel_name == "matern32":
             input_kernel = batched_MGGP_Matern32(
+                sigma=sigma, lengthscale=ls,
+                group_diff_param=group_diff_param, n_groups=n_groups,
+            )
+        elif kernel_name == "matern52":
+            input_kernel = batched_MGGP_Matern52(
                 sigma=sigma, lengthscale=ls,
                 group_diff_param=group_diff_param, n_groups=n_groups,
             )
@@ -126,9 +131,11 @@ def build_model(
         else:
             raise ValueError(f"Unknown kernel: {kernel_name}")
     else:
-        from gpzoo.kernels import batched_Matern32
+        from gpzoo.kernels import batched_Matern32, batched_Matern52
         if kernel_name == "matern32":
             input_kernel = batched_Matern32(sigma=sigma, lengthscale=ls)
+        elif kernel_name == "matern52":
+            input_kernel = batched_Matern52(sigma=sigma, lengthscale=ls)
         elif kernel_name == "rbf":
             input_kernel = batched_RBF(sigma=sigma, lengthscale=ls)
         else:
