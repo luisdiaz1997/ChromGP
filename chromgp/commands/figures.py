@@ -16,6 +16,8 @@ mpl.use("Agg")
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 import matplotlib.pyplot as plt
 import matplotlib.cm as mcm
+import matplotlib.gridspec as gridspec
+import matplotlib.patches as mpatches
 from PIL import Image
 
 from ..config import Config
@@ -107,12 +109,53 @@ def _expand_to_full(dense: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
     return full
 
 
+def _expand_groups(C: np.ndarray, valid_mask: np.ndarray | None) -> np.ndarray:
+    """Expand dense (N,) group labels to (N_full,) with -1 for gap bins."""
+    if valid_mask is None:
+        return C.astype(np.int64)
+    N_full = len(valid_mask)
+    C_full = np.full(N_full, -1, dtype=np.int64)
+    C_full[valid_mask] = C
+    return C_full
+
+
+def _draw_chromhmm_track(ax, C_full: np.ndarray, group_names: list,
+                         horizontal: bool = True) -> None:
+    """Render ChromHMM state track as a color strip on ax. Gap bins (-1) are white."""
+    from matplotlib.colors import to_rgb
+    n = len(C_full)
+    rgb = np.ones((n, 3), dtype=float)
+    valid = C_full >= 0
+    if valid.any():
+        rgb[valid] = np.array([to_rgb(c) for c in _get_group_colors(C_full[valid], group_names)])
+    if horizontal:
+        ax.imshow(rgb[np.newaxis, :, :], aspect="auto", interpolation="nearest")
+    else:
+        ax.imshow(rgb[:, np.newaxis, :], aspect="auto", interpolation="nearest")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+
+def _group_boundaries(C_full: np.ndarray) -> np.ndarray:
+    """0.5-offset positions in matrix coords where ChromHMM group changes."""
+    valid_idx = np.where(C_full >= 0)[0]
+    if len(valid_idx) < 2:
+        return np.zeros(0, dtype=float)
+    change_mask = np.diff(C_full[valid_idx]) != 0
+    return (valid_idx[1:][change_mask] - 0.5).astype(float)
+
+
 def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
                         C: np.ndarray | None = None,
                         group_names: list | None = None,
                         valid_mask: np.ndarray | None = None,
                         output_path: Path | None = None) -> None:
     """1x3 panel: 3D structure colored by group | reconstructed distances | observed.
+
+    When C is provided, a ChromHMM state track is drawn above and to the left
+    of each matrix panel.
 
     Args:
         Z: Latent 3D positions (N, 3).
@@ -123,10 +166,27 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
         valid_mask: Optional (N_full,) bool mask to expand reconstruction with NaN gaps.
         output_path: Where to save the figure.
     """
-    fig = plt.figure(figsize=(18, 5))
-    ax1 = fig.add_subplot(1, 3, 1, projection="3d")
-    ax2 = fig.add_subplot(1, 3, 2)
-    ax3 = fig.add_subplot(1, 3, 3)
+    tk = 0.25  # track thickness relative to panel size of 5
+
+    if C is not None:
+        # Layout: rows=[h-track(thin), main], cols=[3D, v-track, recon, v-track, obs]
+        fig = plt.figure(figsize=(19.0, 5.5))
+        gs = gridspec.GridSpec(2, 5, figure=fig,
+                               width_ratios=[5, tk, 5, tk, 5],
+                               height_ratios=[tk, 5],
+                               wspace=0.02, hspace=0.02)
+        ax1 = fig.add_subplot(gs[:, 0], projection="3d")
+        ax_ht2 = fig.add_subplot(gs[0, 2])
+        ax_vt2 = fig.add_subplot(gs[1, 1])
+        ax2   = fig.add_subplot(gs[1, 2])
+        ax_ht3 = fig.add_subplot(gs[0, 4])
+        ax_vt3 = fig.add_subplot(gs[1, 3])
+        ax3   = fig.add_subplot(gs[1, 4])
+    else:
+        fig = plt.figure(figsize=(18, 5))
+        ax1 = fig.add_subplot(1, 3, 1, projection="3d")
+        ax2 = fig.add_subplot(1, 3, 2)
+        ax3 = fig.add_subplot(1, 3, 3)
 
     # --- Panel 1: 3D structure ---
     ax1.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.5, zorder=1)
@@ -134,7 +194,6 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
         bin_colors = _get_group_colors(C, group_names)
         ax1.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=2.0,
                     alpha=0.85, edgecolors="none", zorder=2)
-        # Legend
         legend_elements = [
             plt.Line2D([0], [0], marker="o", color="w",
                        markerfacecolor=_COARSE_GROUP_COLORS.get(
@@ -163,6 +222,14 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
     im3 = ax3.matshow(Y_obs, cmap="YlOrRd", aspect="auto")
     ax3.set_title("Observed Contact Matrix", fontsize=12)
     plt.colorbar(im3, ax=ax3, fraction=0.046)
+
+    # --- ChromHMM tracks ---
+    if C is not None:
+        C_full = _expand_groups(C, valid_mask)
+        _draw_chromhmm_track(ax_ht2, C_full, group_names, horizontal=True)
+        _draw_chromhmm_track(ax_vt2, C_full, group_names, horizontal=False)
+        _draw_chromhmm_track(ax_ht3, C_full, group_names, horizontal=True)
+        _draw_chromhmm_track(ax_vt3, C_full, group_names, horizontal=False)
 
     fig.tight_layout()
     if output_path:
@@ -377,7 +444,7 @@ def plot_groupwise_reconstructions(
     group_names: list,
     valid_mask: np.ndarray | None,
     output_path: Path,
-    panel_size: float = 3.5,
+    panel_size: float = 4.5,
 ) -> None:
     """2-row grid: 3D structure (top) + reconstructed distances (bottom) per group.
 
@@ -397,6 +464,7 @@ def plot_groupwise_reconstructions(
     """
     n_groups = len(groupwise_positions)
     n_cols = 1 + n_groups  # unconditional + one per group
+    tk = 0.25  # track thickness relative to panel_size
 
     # Ordered list of (positions, title) for all columns
     all_structures = [(Z_uncond, "Unconditional")] + [
@@ -413,7 +481,7 @@ def plot_groupwise_reconstructions(
     half_span = (all_Z.max(axis=0) - all_Z.min(axis=0)).max() / 2 * 1.05
     lims = [(centers[i] - half_span, centers[i] + half_span) for i in range(3)]
 
-    # Pre-compute reconstruction matrices for shared color range
+    # Pre-compute reconstruction matrices
     recon_mats = []
     for Z, _ in all_structures:
         Z_t = torch.tensor(Z)
@@ -427,14 +495,24 @@ def plot_groupwise_reconstructions(
     vmin, vmax = float(uncond_vals.min()), float(uncond_vals.max())
 
     bin_colors = _get_group_colors(C, group_names)
+    C_full = _expand_groups(C, valid_mask)
 
-    fig = plt.figure(figsize=(panel_size * n_cols, panel_size * 2))
+    # GridSpec: rows=[3D, h-track(thin), recon]
+    #           cols=[v-track, main] × n_cols + [cbar]
+    # The colorbar gets its own column so it never steals width from the recon
+    # panels — that's what keeps the h-track and the matrix aligned (HMMC trick).
+    ps = panel_size
+    cbar_w = 0.25
+    fig = plt.figure(figsize=(n_cols * (tk + ps) + cbar_w, 2 * ps + tk))
+    gs = gridspec.GridSpec(3, 2 * n_cols + 1, figure=fig,
+                           width_ratios=[tk, ps] * n_cols + [cbar_w],
+                           height_ratios=[ps, tk, ps],
+                           wspace=0.02, hspace=0.02)
 
+    last_im = None
     for col_i, ((Z, title), recon_mat) in enumerate(zip(all_structures, recon_mats)):
-        subplot_col = col_i + 1  # 1-indexed
-
-        # Top row: 3D structure
-        ax3d = fig.add_subplot(2, n_cols, subplot_col, projection="3d")
+        # 3D panel — spans v-track + main cols so it's centred above the recon
+        ax3d = fig.add_subplot(gs[0, 2 * col_i: 2 * col_i + 2], projection="3d")
         ax3d.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.5, zorder=1)
         ax3d.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=1.5,
                      alpha=0.8, edgecolors="none", zorder=2)
@@ -447,28 +525,46 @@ def plot_groupwise_reconstructions(
         ax3d.set_zticks([])
         ax3d.view_init(elev=20, azim=-100)
 
-        # Bottom row: reconstruction distance matrix
-        ax2d = fig.add_subplot(2, n_cols, n_cols + subplot_col)
-        im = ax2d.matshow(recon_mat, cmap="YlOrRd_r", aspect="auto", vmin=vmin, vmax=vmax)
+        # h-track above recon (thin row, main col only)
+        ax_ht = fig.add_subplot(gs[1, 2 * col_i + 1])
+        _draw_chromhmm_track(ax_ht, C_full, group_names, horizontal=True)
+        ax_ht.margins(0)
+        ax_ht.set_xlim(-0.5, len(C_full) - 0.5)
+
+        # v-track left of recon
+        ax_vt = fig.add_subplot(gs[2, 2 * col_i])
+        _draw_chromhmm_track(ax_vt, C_full, group_names, horizontal=False)
+        ax_vt.margins(0)
+        ax_vt.set_ylim(len(C_full) - 0.5, -0.5)
+
+        # Reconstruction matrix — no colorbar here so its width is never stolen
+        ax2d = fig.add_subplot(gs[2, 2 * col_i + 1])
+        last_im = ax2d.matshow(recon_mat, cmap="YlOrRd_r", aspect="auto", vmin=vmin, vmax=vmax)
         ax2d.set_xticks([])
         ax2d.set_yticks([])
-        plt.colorbar(im, ax=ax2d, fraction=0.046, pad=0.04)
 
-    # Legend: group colors
+    # Single shared colorbar in the dedicated rightmost column
+    ax_cbar = fig.add_subplot(gs[2, -1])
+    fig.colorbar(last_im, cax=ax_cbar, label="Distance")
+    ax_cbar.tick_params(labelsize=7)
+
+    # Legend: colored patch per group, placed in the cbar column above the colorbar
     legend_elements = [
-        plt.Line2D([0], [0], marker="o", color="w",
-                   markerfacecolor=_COARSE_GROUP_COLORS.get(
-                       group_names[g] if group_names else "",
-                       _STATE_COLORS[g % len(_STATE_COLORS)]),
-                   markersize=5,
-                   label=group_names[g] if group_names else f"Group {g}")
+        mpatches.Patch(
+            facecolor=_COARSE_GROUP_COLORS.get(
+                group_names[g] if group_names else "",
+                _STATE_COLORS[g % len(_STATE_COLORS)]),
+            label=group_names[g] if group_names else f"Group {g}")
         for g in range(n_groups)
     ]
-    fig.legend(handles=legend_elements, loc="lower right",
-               fontsize=6, ncol=2, framealpha=0.8)
+    ax_legend = fig.add_subplot(gs[0:2, -1])
+    ax_legend.axis("off")
+    ax_legend.legend(handles=legend_elements,
+                     loc="center", fontsize=8,
+                     framealpha=0.9, handlelength=1.5)
 
     fig.suptitle("Groupwise Conditional 3D Structures and Reconstructions",
-                 fontsize=10, y=1.01)
+                 fontsize=10)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
