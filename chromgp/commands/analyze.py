@@ -74,12 +74,20 @@ def run(config_path: str):
     print(f"Device: {device}")
 
     # --- Load model ---
-    from ..commands.train import build_model_svgp, build_model_mggp_svgp
+    from ..commands.train import (build_model_svgp, build_model_mggp_svgp,
+                                   build_model_lcgp, build_model_mggp_lcgp)
     use_groups = config.groups
+    prior_type = config.model.get("prior", "SVGP").upper()
     if use_groups:
-        model = build_model_mggp_svgp(config, X=data.X, C=data.C, n_groups=data.n_groups)
+        if prior_type == "LCGP":
+            model = build_model_mggp_lcgp(config, X=data.X, C=data.C, n_groups=data.n_groups)
+        else:
+            model = build_model_mggp_svgp(config, X=data.X, C=data.C, n_groups=data.n_groups)
     else:
-        model = build_model_svgp(config, X=data.X)
+        if prior_type == "LCGP":
+            model = build_model_lcgp(config, X=data.X)
+        else:
+            model = build_model_svgp(config, X=data.X)
     model = model.to(device)
     ckpt = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
