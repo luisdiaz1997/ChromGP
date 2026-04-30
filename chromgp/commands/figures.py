@@ -182,31 +182,28 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
         valid_mask: Optional (N_full,) bool mask to expand reconstruction with NaN gaps.
         output_path: Where to save the figure.
     """
-    tk = 0.25    # track thickness
-    cbar_w = 0.3  # dedicated colorbar column width
+    tk = 0.25  # track thickness
 
     if C is not None:
-        # cols: [3D | v-tk | recon | cbar | v-tk | obs | cbar]
+        # cols: [3D | v-tk | recon | v-tk | obs]
         # rows: [h-track(thin) | main]
-        # Figure sized so each GridSpec unit = 1 inch → matrix panels are
-        # exactly ps×ps inches (square) regardless of track/cbar widths.
-        ps = 3.5
-        w_ratios = [ps, tk, ps, cbar_w, tk, ps, cbar_w]
+        # Colorbars added via fig.colorbar(ax=[h-track, matrix]) — steal space
+        # from both rows together so h-track/matrix stay aligned.
+        ps = 5   # panel size (restores original 5-inch panels)
+        w_ratios = [ps, tk, ps, tk, ps]
         h_ratios = [tk, ps]
         fig = plt.figure(figsize=(sum(w_ratios), sum(h_ratios)))
-        gs = gridspec.GridSpec(2, 7, figure=fig,
+        gs = gridspec.GridSpec(2, 5, figure=fig,
                                width_ratios=w_ratios,
                                height_ratios=h_ratios,
-                               wspace=0.02, hspace=0.02)
+                               wspace=0.05, hspace=0.02)
         ax1    = fig.add_subplot(gs[:, 0], projection="3d")
         ax_ht2 = fig.add_subplot(gs[0, 2])
         ax_vt2 = fig.add_subplot(gs[1, 1])
         ax2    = fig.add_subplot(gs[1, 2])
-        ax_cb2 = fig.add_subplot(gs[1, 3])
-        ax_ht3 = fig.add_subplot(gs[0, 5])
-        ax_vt3 = fig.add_subplot(gs[1, 4])
-        ax3    = fig.add_subplot(gs[1, 5])
-        ax_cb3 = fig.add_subplot(gs[1, 6])
+        ax_ht3 = fig.add_subplot(gs[0, 4])
+        ax_vt3 = fig.add_subplot(gs[1, 3])
+        ax3    = fig.add_subplot(gs[1, 4])
     else:
         fig = plt.figure(figsize=(18, 5))
         ax1 = fig.add_subplot(1, 3, 1, projection="3d")
@@ -249,8 +246,10 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
         ax3.set_title("Observed Contact Matrix", fontsize=12)
 
     if C is not None:
-        fig.colorbar(im2, cax=ax_cb2)
-        fig.colorbar(im3, cax=ax_cb3)
+        fig.colorbar(im2, ax=[ax_ht2, ax2], location="right",
+                     fraction=0.04, pad=0.02).ax.tick_params(labelsize=6)
+        fig.colorbar(im3, ax=[ax_ht3, ax3], location="right",
+                     fraction=0.04, pad=0.02).ax.tick_params(labelsize=6)
     else:
         plt.colorbar(im2, ax=ax2, fraction=0.046)
         plt.colorbar(im3, ax=ax3, fraction=0.046)
@@ -394,7 +393,7 @@ def plot_groupwise_coordinates(
     C: np.ndarray,
     group_names: list,
     output_path: Path,
-    panel_size: float = 3.5,
+    panel_size: float = 3.0,
 ) -> None:
     """Grid of 3D chromatin structures: unconditional + one per ChromHMM group.
 
@@ -484,7 +483,7 @@ def plot_groupwise_reconstructions(
     group_names: list,
     valid_mask: np.ndarray | None,
     output_path: Path,
-    panel_size: float = 3.5,
+    panel_size: float = 2.5,
     resolution: int | None = None,
     start_bp: int = 0,
 ) -> None:
@@ -544,7 +543,7 @@ def plot_groupwise_reconstructions(
     # The colorbar gets its own column so it never steals width from the recon
     # panels — that's what keeps the h-track and the matrix aligned (HMMC trick).
     ps = panel_size
-    cbar_w = 0.25
+    cbar_w = 0.2
     fig = plt.figure(figsize=(n_cols * (tk + ps) + cbar_w, 2 * ps + tk))
     gs = gridspec.GridSpec(3, 2 * n_cols + 1, figure=fig,
                            width_ratios=[tk, ps] * n_cols + [cbar_w],
