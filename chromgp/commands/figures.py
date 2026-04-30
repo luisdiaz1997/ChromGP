@@ -275,13 +275,21 @@ def plot_groupwise_coordinates(
 
     bin_colors = _get_group_colors(C)  # (N,) hex strings by actual group
 
+    # Compute shared cubic bounding box across all panels so sizes are comparable
+    all_Z = np.vstack([Z_uncond] + list(groupwise_positions.values()))
+    centers = (all_Z.max(axis=0) + all_Z.min(axis=0)) / 2
+    half_span = (all_Z.max(axis=0) - all_Z.min(axis=0)).max() / 2 * 1.05
+    lims = [(centers[i] - half_span, centers[i] + half_span) for i in range(3)]
+
     def _draw_panel(ax, Z, title):
-        N = Z.shape[0]
         # Draw the chromosome as a thin curve
         ax.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.5, zorder=1)
         # Scatter bins colored by actual ChromHMM state
         ax.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=1.5,
                    alpha=0.8, edgecolors="none", zorder=2)
+        ax.set_xlim(*lims[0])
+        ax.set_ylim(*lims[1])
+        ax.set_zlim(*lims[2])
         ax.set_title(title, fontsize=7, pad=2)
         ax.set_xticks([])
         ax.set_yticks([])
