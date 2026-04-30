@@ -18,7 +18,7 @@ def _run_stage(stage, config, **kwargs):
         cmd.run(config)
     elif stage == "figures":
         from .commands import figures as cmd
-        cmd.run(config)
+        cmd.run(config, animation=kwargs.get("animation", False))
     else:
         raise click.BadParameter(f"Unknown stage: {stage}")
 
@@ -75,10 +75,11 @@ def analyze(config):
 
 @cli.command()
 @click.option("--config", "-c", required=True, type=click.Path(exists=True), help="Path to config YAML")
-def figures(config):
+@click.option("--animation", is_flag=True, default=False, help="Generate training animation GIF (slow)")
+def figures(config, animation):
     """Generate publication figures (ELBO curve, reconstruction, training animation)."""
     from .commands import figures as fig_cmd
-    fig_cmd.run(config)
+    fig_cmd.run(config, animation=animation)
 
 
 @cli.command()
@@ -89,7 +90,9 @@ def figures(config):
               help="Resume training from saved checkpoint")
 @click.option("--video", is_flag=True, default=False,
               help="Capture trajectory snapshots and save as MP4")
-def run(stages, config, resume, video):
+@click.option("--animation", is_flag=True, default=False,
+              help="Generate training animation GIF (slow)")
+def run(stages, config, resume, video, animation):
     """Run pipeline stages sequentially.
 
     \b
@@ -120,6 +123,6 @@ def run(stages, config, resume, video):
         click.echo(f"\n{'='*60}")
         click.echo(f"  Stage: {stage}")
         click.echo(f"{'='*60}\n")
-        _run_stage(stage, config, resume=resume, video=video)
+        _run_stage(stage, config, resume=resume, video=video, animation=animation)
 
     click.echo(f"\nAll stages complete.")

@@ -93,6 +93,10 @@ def run(config_path: str):
     gw_dir = output_dir / "groupwise_positions"
     gw_dir.mkdir(parents=True, exist_ok=True)
 
+    # Remove any stale group_*.npy files from a previous run with different n_groups
+    for stale in gw_dir.glob("group_*.npy"):
+        stale.unlink()
+
     # --- Unconditional posterior (standard forward, actual group labels) ---
     gp_kwargs = {"groupsX": data.C.to(device)} if use_groups else {}
     with torch.no_grad():

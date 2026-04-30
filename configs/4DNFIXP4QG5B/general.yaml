@@ -31,13 +31,13 @@ model:
   noise: 0.1
   jitter: 1e-5
   integrated_force: false
-  group_diff_param: 1.0
+  group_diff_param: 0.1
   K: 50
   neighbors: probabilistic
   precompute_knn: true
 
 training:
-  max_iter: 50000
+  max_iter: 500000
   learning_rate: 0.002
   optimizer: Adam
   device: gpu

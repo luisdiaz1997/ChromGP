@@ -352,7 +352,8 @@ def plot_groupwise_coordinates(
                    markerfacecolor=_COARSE_GROUP_COLORS.get(
                        group_names[g] if group_names else "",
                        _STATE_COLORS[g % len(_STATE_COLORS)]),
-                   markersize=5, label=group_names[g] if group_names else f"Group {g}")
+                   markersize=5,
+                   label=group_names[g] if group_names else f"Group {g}")
         for g in range(n_groups)
     ]
     fig.legend(handles=legend_elements, loc="lower right",
@@ -421,8 +422,9 @@ def plot_groupwise_reconstructions(
             recon = _expand_to_full(recon, valid_mask)
         recon_mats.append(recon)
 
-    valid_vals = np.concatenate([m[~np.isnan(m)].ravel() for m in recon_mats])
-    vmin, vmax = float(valid_vals.min()), float(valid_vals.max())
+    # Anchor vmin/vmax to the unconditional panel so the scale matches reconstruction.png
+    uncond_vals = recon_mats[0][~np.isnan(recon_mats[0])].ravel()
+    vmin, vmax = float(uncond_vals.min()), float(uncond_vals.max())
 
     bin_colors = _get_group_colors(C, group_names)
 
