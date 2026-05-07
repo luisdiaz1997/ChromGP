@@ -37,8 +37,8 @@ model:
   precompute_knn: true
 
 training:
-  max_iter: 10000
-  learning_rate: 0.002
+  max_iter: 20000
+  learning_rate: 0.01
   optimizer: Adam
   device: gpu
   batch_size: 500
