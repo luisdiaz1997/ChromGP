@@ -1,0 +1,50 @@
+name: GM12878_chipseq_chr22
+seed: 67
+dataset: chipseq_GM12878
+output_dir: outputs/chipseq_GM12878
+
+preprocessing:
+  assay: chipseq
+  bigwig_paths:
+    H3K27me3: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/GM12878/H3K27me3/ENCFF919DOR.bigWig
+    H3K4me3: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/GM12878/H3K4me3/ENCFF287HAO.bigWig
+    H3K9me3: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/GM12878/H3K9me3/ENCFF683HCZ.bigWig
+    H3K4me1: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/GM12878/H3K4me1/ENCFF564KBE.bigWig
+    CTCF: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/GM12878/CTCF/ENCFF623JXV.bigWig
+    H3K36me3: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/GM12878/H3K36me3/ENCFF312MUY.bigWig
+    H3K27ac: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/GM12878/H3K27ac/ENCFF469WVA.bigWig
+  resolution: 25000
+  region: chr22
+  signal_stat: mean
+  signal_transform: log1p
+  missing_value: 0.0
+  groups_by: chromhmm_state
+  chromhmm_bed: /gladstone/engelhardt/lab/lchumpitaz/datasets/chromhmm/ENCFF140VIG.bed
+  chromhmm_states: null
+  gc_reference: /gladstone/engelhardt/home/lchumpitaz/gitclones/ChromGP/notebooks/hg38.fa
+
+model:
+  E: 1
+  n_components: 3
+  train_lengthscale: true
+  lengthscale: 400.0
+  noise: 0.1
+  sigma: 1.0
+  scale: 10000
+  integrated_force: false
+  kernel: Matern52
+  jitter: 1.0e-05
+  cholesky_mode: exp
+  output_lengthscale: 1.0
+  num_inducing: 2000
+  scale_kl_NM: true
+  group_diff_param: 0.1
+
+training:
+  max_iter: 20000
+  learning_rate: 0.01
+  optimizer: Adam
+  device: gpu
+  batch_size: 500
+  y_batch_size: null
+  shuffle: true

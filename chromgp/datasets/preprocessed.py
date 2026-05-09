@@ -1,4 +1,4 @@
-"""Load preprocessed Hi-C data from disk.
+"""Load preprocessed genomic data from disk.
 
 Fast path to load standardized data without re-processing.
 """
@@ -40,7 +40,9 @@ def load_preprocessed(output_dir: Union[Path, str]) -> GenomicData:
     # Load arrays
     X = torch.from_numpy(np.load(prep_dir / "X.npy"))
     Y = torch.from_numpy(np.load(prep_dir / "Y.npy"))
-    contact_raw = torch.from_numpy(np.load(prep_dir / "contact_raw.npy"))
+    contact_raw = None
+    if (prep_dir / "contact_raw.npy").exists():
+        contact_raw = torch.from_numpy(np.load(prep_dir / "contact_raw.npy"))
 
     # Load GC content if available
     gc = None

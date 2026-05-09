@@ -118,24 +118,27 @@ def run(config_path: str):
     else:
         print("  Skipping groupwise positions (model has no groups).")
 
-    # --- SCC (Stratum-adjusted Correlation Coefficient) ---
-    print("\nComputing SCC...")
-    contact_raw = data.contact_raw.cpu().numpy() if isinstance(data.contact_raw, torch.Tensor) else data.contact_raw
-    resolution = config.preprocessing.get("resolution", 25000)
-
     scc_results = {}
-    if use_groups and data.C is not None:
-        C = data.C.cpu().numpy() if isinstance(data.C, torch.Tensor) else data.C
-        scc_results = scc_groupwise(
-            contact_raw, Z_uncond, C, data.group_names, resolution=resolution,
-        )
-        print(f"  SCC overall: {scc_results['overall']['scc']:.4f}")
-        for k, v in scc_results.items():
-            if k != "overall":
-                print(f"  SCC {v.get('name', k)}: {v['scc']:.4f}")
+    if data.contact_raw is None:
+        print("\nSkipping SCC: no Hi-C contact_raw matrix in preprocessed data.")
     else:
-        scc_results = scc(contact_raw, Z_uncond, resolution=resolution)
-        print(f"  SCC: {scc_results['scc']:.4f}")
+        # --- SCC (Stratum-adjusted Correlation Coefficient) ---
+        print("\nComputing SCC...")
+        contact_raw = data.contact_raw.cpu().numpy() if isinstance(data.contact_raw, torch.Tensor) else data.contact_raw
+        resolution = config.preprocessing.get("resolution", 25000)
+
+        if use_groups and data.C is not None:
+            C = data.C.cpu().numpy() if isinstance(data.C, torch.Tensor) else data.C
+            scc_results = scc_groupwise(
+                contact_raw, Z_uncond, C, data.group_names, resolution=resolution,
+            )
+            print(f"  SCC overall: {scc_results['overall']['scc']:.4f}")
+            for k, v in scc_results.items():
+                if k != "overall":
+                    print(f"  SCC {v.get('name', k)}: {v['scc']:.4f}")
+        else:
+            scc_results = scc(contact_raw, Z_uncond, resolution=resolution)
+            print(f"  SCC: {scc_results['scc']:.4f}")
 
     # Save predicted distance matrix from unconditional positions
     pred_dist = np.linalg.norm(

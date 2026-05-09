@@ -347,7 +347,10 @@ def run(config_path: str, resume: bool = False, video: bool = False):
 
     # --- Data tensors ---
     X = data.X        # (N,)
-    y = data.Y        # (N, D)  — note: rows=bins, cols=features/replicates
+    # Store preprocessed targets as bins x features, but the MultivariateNormal
+    # event dimension is genomic bins.  Train against features x bins so
+    # rectangular ChIP-seq/CTCF targets work; square Hi-C remains unchanged.
+    y = data.Y.T.contiguous()  # (D, N)
     C = data.C        # (N,) or None
 
     # Save original KNN indices on CPU for easy slicing during training

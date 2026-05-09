@@ -1,4 +1,4 @@
-"""Preprocess command for Hi-C data."""
+"""Preprocess command for genomic signal data."""
 
 import json
 import time
@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from ..config import Config
-from ..datasets import HiCLoader, GenomicData
+from ..datasets import ChIPSeqLoader, HiCLoader, GenomicData
 
 
 def _filter_nans(data: GenomicData) -> GenomicData:
@@ -74,8 +74,16 @@ def _filter_nans(data: GenomicData) -> GenomicData:
     )
 
 
+def _select_loader(preprocessing: dict):
+    """Select the raw-data loader from preprocessing fields."""
+    assay = preprocessing.get("assay") or preprocessing.get("data_type")
+    if assay in {"chipseq", "chip-seq", "bigwig"} or "bigwig_paths" in preprocessing:
+        return ChIPSeqLoader()
+    return HiCLoader()
+
+
 def run(config_path: str):
-    """Preprocess Hi-C dataset and save standardized files.
+    """Preprocess dataset and save standardized files.
 
     Output files (following SF convention):
     - X.npy: (N,) bin midpoints
@@ -94,8 +102,8 @@ def run(config_path: str):
 
     print(f"Preprocessing dataset: {config.dataset}")
 
-    # Load raw data using HiCLoader
-    loader = HiCLoader()
+    # Load raw data using the configured loader
+    loader = _select_loader(config.preprocessing)
     data = loader.load(config.preprocessing)
 
     print(f"  Loaded: {data.n_bins} bins × {data.n_features} features")
@@ -115,7 +123,8 @@ def run(config_path: str):
     # Save arrays in standardized format
     np.save(output_dir / "X.npy", data.X.numpy())  # (N,)
     np.save(output_dir / "Y.npy", data.Y.numpy())  # (N, D)
-    np.save(output_dir / "contact_raw.npy", data.contact_raw.numpy())  # (N, N)
+    if data.contact_raw is not None:
+        np.save(output_dir / "contact_raw.npy", data.contact_raw.numpy())  # (N, N)
     if data.contact_raw_full is not None:
         np.save(output_dir / "contact_raw_full.npy", data.contact_raw_full.numpy())  # (N_full, N_full) with NaN gaps
     if data.valid_mask is not None:
@@ -155,13 +164,14 @@ def run(config_path: str):
     x_size = (output_dir / "X.npy").stat().st_size / 1e6
     y_size = (output_dir / "Y.npy").stat().st_size / 1e6
     c_size = (output_dir / "C.npy").stat().st_size / 1e6
-    contact_size = (output_dir / "contact_raw.npy").stat().st_size / 1e6
+    contact_size = (output_dir / "contact_raw.npy").stat().st_size / 1e6 if (output_dir / "contact_raw.npy").exists() else 0
     gc_size = (output_dir / "gc.npy").stat().st_size / 1e6 if (output_dir / "gc.npy").exists() else 0
 
     print(f"Preprocessed data saved to: {output_dir}")
     print(f"  X: {data.X.shape} ({x_size:.1f} MB)")
     print(f"  Y: {data.Y.shape} ({y_size:.1f} MB)")
     print(f"  C: {metadata['n_groups']} groups ({c_size:.1f} MB)")
-    print(f"  contact_raw: {data.contact_raw.shape} ({contact_size:.1f} MB)")
+    if data.contact_raw is not None:
+        print(f"  contact_raw: {data.contact_raw.shape} ({contact_size:.1f} MB)")
     if gc_size:
         print(f"  gc: {data.gc.shape} ({gc_size:.1f} MB)")

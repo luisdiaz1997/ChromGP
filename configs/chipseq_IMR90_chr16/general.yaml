@@ -1,0 +1,50 @@
+name: IMR90_chipseq_chr16
+seed: 67
+dataset: chipseq_IMR90
+output_dir: outputs/chipseq_IMR90
+
+preprocessing:
+  assay: chipseq
+  bigwig_paths:
+    H3K27me3: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/IMR90/H3K27me3/ENCFF366BVS.bigWig
+    H3K4me3: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/IMR90/H3K4me3/ENCFF376ZIM.bigWig
+    H3K9me3: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/IMR90/H3K9me3/ENCFF066MEE.bigWig
+    H3K4me1: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/IMR90/H3K4me1/ENCFF221MJG.bigWig
+    CTCF: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/IMR90/CTCF/ENCFF143SWF.bigWig
+    H3K36me3: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/IMR90/H3K36me3/ENCFF519FHW.bigWig
+    H3K27ac: /gladstone/engelhardt/lab/lchumpitaz/datasets/chipseq/IMR90/H3K27ac/ENCFF699OAR.bigWig
+  resolution: 25000
+  region: chr16
+  signal_stat: mean
+  signal_transform: log1p
+  missing_value: 0.0
+  groups_by: chromhmm_state
+  chromhmm_bed: /gladstone/engelhardt/lab/lchumpitaz/datasets/chromhmm/E017_15_coreMarks_hg38lift_mnemonics.bed
+  chromhmm_states: null
+  gc_reference: /gladstone/engelhardt/home/lchumpitaz/gitclones/ChromGP/notebooks/hg38.fa
+
+model:
+  E: 1
+  n_components: 3
+  train_lengthscale: true
+  lengthscale: 400.0
+  noise: 0.1
+  sigma: 1.0
+  scale: 10000
+  integrated_force: false
+  kernel: Matern52
+  jitter: 1.0e-05
+  cholesky_mode: exp
+  output_lengthscale: 1.0
+  num_inducing: 2000
+  scale_kl_NM: true
+  group_diff_param: 0.1
+
+training:
+  max_iter: 20000
+  learning_rate: 0.01
+  optimizer: Adam
+  device: gpu
+  batch_size: 500
+  y_batch_size: null
+  shuffle: true

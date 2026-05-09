@@ -24,6 +24,13 @@ from ..config import Config
 from ..datasets import load_preprocessed
 
 
+_COMPARISON_MCOOL_BY_DATASET = {
+    "chipseq_GM12878": "/gladstone/engelhardt/lab/lchumpitaz/hi-c/mcools/4DNFIXP4QG5B.mcool",
+    "chipseq_IMR90": "/gladstone/engelhardt/lab/lchumpitaz/hi-c/mcools/4DNFIJTOIGOI.mcool",
+    "chipseq_K562": "/gladstone/engelhardt/lab/lchumpitaz/hi-c/mcools/4DNFI18UHVRO.mcool",
+}
+
+
 # ---------------------------------------------------------------------------
 # ELBO plot — matches SF's plot_elbo_curve exactly
 # ---------------------------------------------------------------------------
@@ -115,6 +122,39 @@ def _expand_to_full(dense: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
     idx = np.where(valid_mask)[0]
     full[np.ix_(idx, idx)] = dense
     return full
+
+
+def _expand_tracks_to_full(tracks: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
+    """Expand feature x N tracks to feature x N_full with NaN in filtered bins."""
+    full = np.full((tracks.shape[0], len(valid_mask)), np.nan)
+    full[:, valid_mask] = tracks
+    return full
+
+
+def _load_comparison_hic(config: Config) -> np.ndarray | None:
+    """Load matched Hi-C matrix for ChIP-seq reconstruction figures.
+
+    ChIP-seq preprocessing has no contact_raw matrix, but for reconstruction
+    figures we still want the observed panel to be actual Hi-C with NaN gaps.
+    """
+    prep = config.preprocessing
+    mcool_path = (
+        prep.get("comparison_mcool_path")
+        or prep.get("hic_mcool_path")
+        or _COMPARISON_MCOOL_BY_DATASET.get(config.dataset)
+    )
+    if not mcool_path:
+        return None
+
+    import cooler
+
+    resolution = prep.get("comparison_resolution", prep.get("resolution", 25000))
+    region = prep.get("comparison_region", prep.get("region"))
+    balance = prep.get("comparison_balance", prep.get("balance", True))
+    clr = cooler.Cooler(f"{mcool_path}::/resolutions/{resolution}")
+    matrix = clr.matrix(balance=balance).fetch(region)
+    print(f"  Loaded comparison Hi-C: {mcool_path} {region} ({matrix.shape})")
+    return matrix
 
 
 def _expand_groups(C: np.ndarray, valid_mask: np.ndarray | None) -> np.ndarray:
@@ -249,11 +289,17 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
         ax2.set_title("Reconstructed Distances", fontsize=12)
 
     # --- Panel 3: Observed data ---
-    Y_obs = np.log10(Y + 5e-6)
+    observed_square = Y.ndim == 2 and Y.shape[0] == Y.shape[1]
+    if observed_square:
+        Y_obs = np.log10(Y + 5e-6)
+        observed_title = "Observed Contact Matrix"
+    else:
+        Y_obs = Y
+        observed_title = "Observed ChIP-seq Signal"
     Y_masked, cmap_obs = _dark_nans(Y_obs, "YlOrRd")
     im3 = ax3.matshow(Y_masked, cmap=cmap_obs, aspect="auto")
     if C is None:
-        ax3.set_title("Observed Contact Matrix", fontsize=12)
+        ax3.set_title(observed_title, fontsize=12)
 
     if C is not None:
         fig.colorbar(im2, ax=[ax_ht2, ax2], location="right",
@@ -271,8 +317,11 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
         ax_ht2.set_title("Reconstructed Distances", fontsize=9, pad=3)
         _draw_chromhmm_track(ax_vt2, C_full, group_names, horizontal=False)
         _draw_chromhmm_track(ax_ht3, C_full, group_names, horizontal=True)
-        ax_ht3.set_title("Observed Contact Matrix", fontsize=9, pad=3)
-        _draw_chromhmm_track(ax_vt3, C_full, group_names, horizontal=False)
+        ax_ht3.set_title(observed_title, fontsize=9, pad=3)
+        if observed_square:
+            _draw_chromhmm_track(ax_vt3, C_full, group_names, horizontal=False)
+        else:
+            ax_vt3.axis("off")
 
     # --- Genomic position ticks (plotmap convention: bottom + right) ---
     if resolution is not None:
@@ -666,7 +715,13 @@ def run(config_path: str, animation: bool = False):
     elif data.contact_raw is not None:
         Y_observed = data.contact_raw.numpy()
     else:
-        Y_observed = data.Y.numpy()
+        Y_observed = _load_comparison_hic(config)
+        if Y_observed is None:
+            # ChIP-seq targets are stored as bins x marks.  Plot as marks x bins so
+            # genomic position remains on the x-axis.
+            Y_observed = data.Y.numpy().T
+            if data.valid_mask is not None:
+                Y_observed = _expand_tracks_to_full(Y_observed, data.valid_mask.numpy())
     C = data.C.numpy().astype(int) if data.C is not None else None
     group_names = data.group_names
     valid_mask_np = data.valid_mask.numpy() if data.valid_mask is not None else None
