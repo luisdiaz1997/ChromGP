@@ -10,12 +10,12 @@ Multi-cooler files stored in `/gladstone/engelhardt/lab/lchumpitaz/hi-c/mcools/`
 | Cell line | Description | Roadmap E-ID | 4DN accession | Local file |
 |-----------|-------------|-------------|---------------|------------|
 | **GM12878** | B-lymphoblastoid (karyotypically normal) | E116 | `4DNFIXP4QG5B` | `4DNFIXP4QG5B.mcool` |
-| **K562** | Chronic myeloid leukemia | E123 | TBD | — |
+| **K562** | Chronic myeloid leukemia | E123 | `4DNFI18UHVRO` | `4DNFI18UHVRO.mcool` |
 | **HeLa S3** | Cervical adenocarcinoma | — | TBD | — |
-| **HUVEC** | Umbilical vein endothelial | E122 | TBD | — |
+| **HUVEC** | Umbilical vein endothelial | E122 | `4DNFIRMZ7QTE` | `4DNFIRMZ7QTE.mcool` |
 | **NHEK** | Epidermal keratinocytes | E057 | TBD | — |
 | **KBM7** | CML, near-haploid | — | TBD | — |
-| **IMR90** | Fetal lung fibroblasts | E017 | TBD | — |
+| **IMR90** | Fetal lung fibroblasts | E017 | `4DNFIJTOIGOI` | `4DNFIJTOIGOI.mcool` |
 | **HMEC** | Mammary epithelial | E119 | TBD | — |
 
 Six of eight cell lines (all except HeLa S3 and KBM7) have matching Roadmap Epigenomics 15-state ChromHMM models.
@@ -34,6 +34,9 @@ Naming pattern: `E<ID>_15_coreMarks_hg38lift_mnemonics.bed.gz`
 | Roadmap ID | Cell line | Local file |
 |------------|-----------|------------|
 | E116 | GM12878 | `E116_15_coreMarks_hg38lift_mnemonics.bed.gz` (and `.bed`) |
+| E017 | IMR90 | `E017_15_coreMarks_hg38lift_mnemonics.bed.gz` (and `.bed`) |
+| E123 | K562 | `E123_15_coreMarks_hg38lift_mnemonics.bed.gz` (and `.bed`) |
+| E122 | HUVEC | `E122_15_coreMarks_hg38lift_mnemonics.bed.gz` (and `.bed`) |
 
 ### Needed (for other Rao 2014 cell lines)
 

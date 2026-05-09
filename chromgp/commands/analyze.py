@@ -1,9 +1,12 @@
 """Analyze a trained ChromGP model.
 
-Currently computes groupwise conditional 3D positions for MGGP models,
+Computes groupwise conditional 3D positions for MGGP models,
 following the SF convention: for each ChromHMM group g, run the GP forward
 pass with all bins forced to group g to get the conditional posterior mean
 Z_g (N, 3). Results are saved to groupwise_positions/ for the figures stage.
+
+Also computes SCC (Stratum-adjusted Correlation Coefficient, Yang et al. 2017)
+between observed contacts and reconstructed distances.
 """
 
 import json
@@ -13,6 +16,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from ..analysis import scc, scc_groupwise
 from ..config import Config
 from ..datasets import load_preprocessed
 
@@ -114,6 +118,32 @@ def run(config_path: str):
     else:
         print("  Skipping groupwise positions (model has no groups).")
 
+    # --- SCC (Stratum-adjusted Correlation Coefficient) ---
+    print("\nComputing SCC...")
+    contact_raw = data.contact_raw.cpu().numpy() if isinstance(data.contact_raw, torch.Tensor) else data.contact_raw
+    resolution = config.preprocessing.get("resolution", 25000)
+
+    scc_results = {}
+    if use_groups and data.C is not None:
+        C = data.C.cpu().numpy() if isinstance(data.C, torch.Tensor) else data.C
+        scc_results = scc_groupwise(
+            contact_raw, Z_uncond, C, data.group_names, resolution=resolution,
+        )
+        print(f"  SCC overall: {scc_results['overall']['scc']:.4f}")
+        for k, v in scc_results.items():
+            if k != "overall":
+                print(f"  SCC {v.get('name', k)}: {v['scc']:.4f}")
+    else:
+        scc_results = scc(contact_raw, Z_uncond, resolution=resolution)
+        print(f"  SCC: {scc_results['scc']:.4f}")
+
+    # Save predicted distance matrix from unconditional positions
+    pred_dist = np.linalg.norm(
+        Z_uncond[:, None, :] - Z_uncond[None, :, :], axis=-1
+    )
+    np.save(output_dir / "predicted_distance.npy", pred_dist)
+    print(f"  Saved predicted_distance: {pred_dist.shape}")
+
     # --- analysis.json ---
     meta = {
         "n_bins": data.n_bins,
@@ -121,8 +151,9 @@ def run(config_path: str):
         "group_names": data.group_names,
         "use_groups": use_groups,
         "model_name": model_name,
+        "scc": scc_results,
     }
     with open(output_dir / "analysis.json", "w") as f:
-        json.dump(meta, f, indent=2)
+        json.dump(meta, f, indent=2, default=str)
 
     print("\nAnalysis complete.")
