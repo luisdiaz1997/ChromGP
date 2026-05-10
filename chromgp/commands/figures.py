@@ -401,6 +401,19 @@ def create_training_animation(
     # Pre-compute group colors once (reused across frames)
     bin_colors_anim = _get_group_colors(C, group_names) if C is not None else None
 
+    # Keep the 3D panel stable across the animation.  Use the final structure
+    # as the reference frame so the presentation focuses on convergence toward
+    # the final result instead of autoscaled camera/axis jumps.
+    final_Z = Zs[frame_indices[-1]]
+    final_center = final_Z.mean(axis=0)
+    final_span = np.ptp(final_Z, axis=0)
+    final_radius = max(float(final_span.max()) / 2.0, 1e-3)
+    final_radius *= 1.15
+    axis_lims = [
+        (float(final_center[d] - final_radius), float(final_center[d] + final_radius))
+        for d in range(3)
+    ]
+
     fig = plt.figure(figsize=(18, 5))
     ax1 = fig.add_subplot(1, 3, 1, projection="3d")
     ax2 = fig.add_subplot(1, 3, 2)
@@ -440,6 +453,10 @@ def create_training_animation(
                         alpha=0.8, edgecolors="none", zorder=2)
         else:
             ax1.plot(z[:, 0], z[:, 1], z[:, 2], lw=1.5)
+        ax1.set_xlim(*axis_lims[0])
+        ax1.set_ylim(*axis_lims[1])
+        ax1.set_zlim(*axis_lims[2])
+        ax1.set_box_aspect((1, 1, 1))
         ax1.view_init(elev=20, azim=-100)
         ax1.set_title(f"3D Structure (iter {it})", fontsize=12)
 
