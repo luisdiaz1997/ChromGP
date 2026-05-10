@@ -1,0 +1,49 @@
+name: demo_lr1e2_init015_IMR90_chr19_hic_svgp
+seed: 67
+dataset: 4DNFIJTOIGOI
+output_dir: outputs/demo_chr19_lr1e2_init015/IMR90_hic
+
+preprocessing:
+  mcool_path: /gladstone/engelhardt/lab/lchumpitaz/hi-c/mcools/4DNFIJTOIGOI.mcool
+  resolution: 25000
+  region: chr19
+  balance: true
+  contact_transform: log10
+  num_replicates: 1
+  noise_level: 0.15
+  groups_by: chromhmm_state
+  chromhmm_bed: /gladstone/engelhardt/lab/lchumpitaz/datasets/chromhmm/E017_15_coreMarks_hg38lift_mnemonics.bed
+  chromhmm_states: null
+  gc_reference: /gladstone/engelhardt/home/lchumpitaz/gitclones/ChromGP/notebooks/hg38.fa
+
+model:
+  n_components: 3
+  E: 1
+  kernel: Matern52
+  lengthscale: 400.0
+  output_lengthscale: 1.0
+  sigma: 1.0
+  train_lengthscale: true
+  num_inducing: 2000
+  init_scale: 0.15
+  cholesky_mode: exp
+  scale_kl_NM: true
+  scale: 10000
+  noise: 0.1
+  jitter: 1e-5
+  integrated_force: false
+  group_diff_param: 0.1
+  K: 50
+  neighbors: probabilistic
+  precompute_knn: true
+  prior: SVGP
+  groups: false
+
+training:
+  max_iter: 3000
+  learning_rate: 0.01
+  optimizer: Adam
+  device: gpu
+  batch_size: 500
+  y_batch_size: null
+  shuffle: true

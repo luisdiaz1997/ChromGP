@@ -55,6 +55,7 @@ class Config:
         "output_lengthscale": 1.0,
         "sigma": 1.0,
         "train_lengthscale": False,
+        "init_scale": 1.0,
         "num_inducing": 2000,
         "cholesky_mode": "exp",
         "noise": 0.1,

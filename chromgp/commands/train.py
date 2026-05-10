@@ -103,6 +103,7 @@ def build_model(
     ls = float(config.model.get("lengthscale", 5e6))
     out_ls = float(config.model.get("output_lengthscale", 1.0))
     sigma = float(config.model.get("sigma", 1.0))
+    init_scale = float(config.model.get("init_scale", 1.0))
     kernel_name = config.model.get("kernel", "Matern32").lower()
     prior_type = config.model.get("prior", "SVGP").upper()
 
@@ -169,7 +170,7 @@ def build_model(
         R = max(1, min(R, 250))
         del gp.Lu
         gp.Lu = nn.Parameter(torch.randn(L, M, R) * (1.0 / R ** 0.5))
-        gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
+        gp.mu = nn.Parameter(torch.randn(L, M) * init_scale)
 
         raw = calculate_knn(
             gp, Z_init, strategy=neighbors,
@@ -207,7 +208,7 @@ def build_model(
 
         del gp.Lu
         gp.Lu = CholeskyParameter((L, M), mode=cholesky_mode, diagonal_only=False)
-        gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
+        gp.mu = nn.Parameter(torch.randn(L, M) * init_scale)
 
     # --- 3. ChromGP wrapper ---
     out_kernel_name = config.model.get("output_kernel", "matern32").lower()
