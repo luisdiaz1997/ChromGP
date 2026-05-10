@@ -886,7 +886,7 @@ def run(config_path: str, animation: bool = False):
                 Zs_stack, Y_observed, X, C, group_names, frame_iters,
                 figures_dir / "training_animation.gif",
                 valid_mask=valid_mask_np,
-                step=gif_step, fps=5,
+                step=gif_step, fps=2.5,
             )
     else:
         print("  Skipping training animation (use --animation to generate).")
