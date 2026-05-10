@@ -22,11 +22,19 @@ def _make_helix(N: int, radius: float, turns: float) -> torch.Tensor:
                         t / (torch.pi * turns)], dim=1)
 
 
-def _poisson_contacts(Z: torch.Tensor, tau: float, nu: float) -> torch.Tensor:
-    D = torch.cdist(Z, Z)
-    lam = nu * torch.exp(-D**2 / (2 * tau**2))
-    contacts = torch.poisson(lam)
-    return torch.tril(contacts) + torch.tril(contacts, -1).T
+def _poisson_contacts(Z: torch.Tensor, replicates: int = 16, z_noise: float = 0.01) -> torch.Tensor:
+    """Sum of `replicates` symmetric Poisson contact maps from noisy copies of Z.
+
+    Notebook convention: rate = 1 / (1 + D^2).
+    """
+    total = torch.zeros(Z.shape[0], Z.shape[0])
+    for _ in range(replicates):
+        Z_eff = Z + z_noise * torch.randn_like(Z)
+        D = torch.cdist(Z_eff, Z_eff)
+        lam = 1.0 / (1.0 + D**2)
+        samples = torch.poisson(lam)
+        total = total + (torch.tril(samples) + torch.tril(samples, -1).T)
+    return total
 
 
 class SyntheticLoader:
@@ -63,9 +71,9 @@ class SyntheticLoader:
         Z_true = Z_true - Z_true.mean(0)
         Z_true = Z_true / Z_true.norm(dim=1).max()
 
-        tau = float(preprocessing.get("tau", 0.1))
-        nu = float(preprocessing.get("nu", 50.0))
-        contacts = _poisson_contacts(Z_true, tau=tau, nu=nu)
+        replicates = int(preprocessing.get("replicates", 16))
+        z_noise = float(preprocessing.get("z_noise", 0.01))
+        contacts = _poisson_contacts(Z_true, replicates=replicates, z_noise=z_noise)
 
         X = torch.linspace(0.0, x_max, N)
 
@@ -79,8 +87,6 @@ class SyntheticLoader:
             metadata={
                 "shape": shape,
                 "N": N,
-                "tau": tau,
-                "nu": nu,
                 "Z_true": Z_true.numpy(),
             },
         )

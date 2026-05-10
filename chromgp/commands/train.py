@@ -240,7 +240,7 @@ def build_model(
         input_kernel.group_diff_param.requires_grad = False
     if not config.model.get("train_lengthscale", False):
         input_kernel.lengthscale.requires_grad = False
-    output_kernel.sigma.requires_grad = False
+    output_kernel.sigma.requires_grad = bool(config.model.get("train_output_sigma", False))
     output_kernel.lengthscale.requires_grad = False
     if not config.model.get("train_noise", True):
         model.noise.requires_grad = False
