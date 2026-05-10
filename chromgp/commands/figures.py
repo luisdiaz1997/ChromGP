@@ -24,6 +24,18 @@ from ..config import Config
 from ..datasets import load_preprocessed
 
 
+def _save_rgb(fig, path: Path, **kwargs) -> None:
+    """Save figure as RGB PNG (strips alpha channel for print)."""
+    kwargs.setdefault("dpi", 300)
+    kwargs.setdefault("bbox_inches", "tight")
+    fig.savefig(path, **kwargs)
+    img = Image.open(path)
+    if img.mode == "RGBA":
+        img.convert("RGB").save(path)
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
 _COMPARISON_MCOOL_BY_DATASET = {
     "chipseq_GM12878": "/gladstone/engelhardt/lab/lchumpitaz/hi-c/mcools/4DNFIXP4QG5B.mcool",
     "chipseq_IMR90": "/gladstone/engelhardt/lab/lchumpitaz/hi-c/mcools/4DNFIJTOIGOI.mcool",
@@ -64,9 +76,7 @@ def plot_elbo(elbo_history: np.ndarray, output_path: Path) -> None:
     ax.legend(loc="upper right")
 
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: {output_path}")
+    _save_rgb(fig, output_path)
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +89,18 @@ def _dark_nans(mat, cmap_name="YlOrRd"):
     cmap = plt.cm.get_cmap(cmap_name).copy()
     cmap.set_bad("0.12")
     return masked, cmap
+
+
+def _robust_limits(mat: np.ndarray, lo: float = 1, hi: float = 99) -> tuple[float | None, float | None]:
+    """Percentile color limits that ignore NaNs and rare distance outliers."""
+    vals = np.asarray(mat)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
+        return None, None
+    vmin, vmax = np.percentile(vals, [lo, hi])
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin >= vmax:
+        return None, None
+    return float(vmin), float(vmax)
 
 
 # Fixed semantic colors for the 5 coarse ChromHMM groups
@@ -259,10 +281,10 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
         ax3 = fig.add_subplot(1, 3, 3)
 
     # --- Panel 1: 3D structure ---
-    ax1.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.5, zorder=1)
+    ax1.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.8, zorder=1)
     if C is not None:
         bin_colors = _get_group_colors(C, group_names)
-        ax1.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=2.0,
+        ax1.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=4,
                     alpha=0.85, edgecolors="none", zorder=2)
         legend_elements = [
             plt.Line2D([0], [0], marker="o", color="w",
@@ -284,7 +306,8 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
     if valid_mask is not None:
         recon_dist = _expand_to_full(recon_dist, valid_mask)
     masked, cmap = _dark_nans(recon_dist, "YlOrRd_r")
-    im2 = ax2.matshow(masked, cmap=cmap, aspect="auto")
+    vmin, vmax = _robust_limits(recon_dist)
+    im2 = ax2.matshow(masked, cmap=cmap, aspect="auto", vmin=vmin, vmax=vmax)
     if C is None:
         ax2.set_title("Reconstructed Distances", fontsize=12)
 
@@ -297,7 +320,8 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
         Y_obs = Y
         observed_title = "Observed ChIP-seq Signal"
     Y_masked, cmap_obs = _dark_nans(Y_obs, "YlOrRd")
-    im3 = ax3.matshow(Y_masked, cmap=cmap_obs, aspect="auto")
+    obs_vmin, obs_vmax = _robust_limits(Y_obs)
+    im3 = ax3.matshow(Y_masked, cmap=cmap_obs, aspect="auto", vmin=obs_vmin, vmax=obs_vmax)
     if C is None:
         ax3.set_title(observed_title, fontsize=12)
 
@@ -331,9 +355,7 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
 
     fig.tight_layout()
     if output_path:
-        fig.savefig(output_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  Saved: {output_path}")
+        _save_rgb(fig, output_path)
     else:
         return fig
 
@@ -387,8 +409,15 @@ def create_training_animation(
     # Static observed matrix (panel 3)
     Y_obs = np.log10(Y + 5e-6)
     Y_masked, cmap_obs = _dark_nans(Y_obs, "YlOrRd")
-    ax3.matshow(Y_masked, cmap=cmap_obs, aspect="auto")
+    obs_vmin, obs_vmax = _robust_limits(Y_obs)
+    ax3.matshow(Y_masked, cmap=cmap_obs, aspect="auto", vmin=obs_vmin, vmax=obs_vmax)
     ax3.set_title("Observed Contact Matrix", fontsize=12)
+
+    final_recon = torch.cdist(torch.tensor(Zs[frame_indices[-1]]),
+                              torch.tensor(Zs[frame_indices[-1]])).numpy()
+    if valid_mask is not None:
+        final_recon = _expand_to_full(final_recon, valid_mask)
+    recon_vmin, recon_vmax = _robust_limits(final_recon)
 
     # Fixed palette: 253 turbo + gray + white + black (SF convention)
     turbo_colors = (mcm.turbo(np.linspace(0, 1, 253))[:, :3] * 255).astype(np.uint8)
@@ -420,7 +449,8 @@ def create_training_animation(
         if valid_mask is not None:
             recon = _expand_to_full(recon, valid_mask)
         recon_masked, cmap_r = _dark_nans(recon, "YlOrRd_r")
-        ax2.matshow(recon_masked, cmap=cmap_r, aspect="auto")
+        ax2.matshow(recon_masked, cmap=cmap_r, aspect="auto",
+                    vmin=recon_vmin, vmax=recon_vmax)
         ax2.set_title("Reconstructed Distances", fontsize=12)
 
         fig.canvas.draw()
@@ -490,9 +520,9 @@ def plot_groupwise_coordinates(
 
     def _draw_panel(ax, Z, title):
         # Draw the chromosome as a thin curve
-        ax.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.5, zorder=1)
+        ax.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.8, zorder=1)
         # Scatter bins colored by actual ChromHMM state
-        ax.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=1.5,
+        ax.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=4,
                    alpha=0.8, edgecolors="none", zorder=2)
         ax.set_xlim(*lims[0])
         ax.set_ylim(*lims[1])
@@ -528,9 +558,7 @@ def plot_groupwise_coordinates(
 
     fig.suptitle("Groupwise Conditional 3D Chromatin Positions", fontsize=10, y=1.01)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: {output_path}")
+    _save_rgb(fig, output_path)
 
 
 # ---------------------------------------------------------------------------
@@ -615,8 +643,8 @@ def plot_groupwise_reconstructions(
     for col_i, ((Z, title), recon_mat) in enumerate(zip(all_structures, recon_mats)):
         # 3D panel — spans v-track + main cols so it's centred above the recon
         ax3d = fig.add_subplot(gs[0, 2 * col_i: 2 * col_i + 2], projection="3d")
-        ax3d.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.5, zorder=1)
-        ax3d.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=1.5,
+        ax3d.plot(Z[:, 0], Z[:, 1], Z[:, 2], lw=0.6, color="lightgray", alpha=0.8, zorder=1)
+        ax3d.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=4,
                      alpha=0.8, edgecolors="none", zorder=2)
         ax3d.set_xlim(*lims[0])
         ax3d.set_ylim(*lims[1])
@@ -672,9 +700,7 @@ def plot_groupwise_reconstructions(
     fig.suptitle("Groupwise Conditional 3D Structures and Reconstructions",
                  fontsize=10)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: {output_path}")
+    _save_rgb(fig, output_path)
 
 
 # ---------------------------------------------------------------------------

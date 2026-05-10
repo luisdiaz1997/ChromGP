@@ -147,6 +147,29 @@ def run(config_path: str):
     np.save(output_dir / "predicted_distance.npy", pred_dist)
     print(f"  Saved predicted_distance: {pred_dist.shape}")
 
+    # --- Per-bin structural specificity (MGGP only) ---
+    specificity = None
+    dominant_state = None
+    if use_groups:
+        print("\nComputing per-bin specificity...")
+        specificity = np.zeros(data.n_bins)
+        dominant_state = np.zeros(data.n_bins, dtype=int)
+        for i in range(data.n_bins):
+            mu_bar = Z_uncond[i]
+            norm_bar = np.linalg.norm(mu_bar)
+            if norm_bar < 1e-8:
+                continue
+            shifts = np.array([np.linalg.norm(positions[g][i] - mu_bar) / norm_bar
+                              for g in range(data.n_groups)])
+            specificity[i] = shifts.max()
+            dominant_state[i] = shifts.argmax()
+        np.save(output_dir / "specificity.npy", specificity)
+        np.save(output_dir / "dominant_state.npy", dominant_state)
+        print(f"  Saved specificity: {specificity.shape}")
+        print(f"  State-specific (>0.7): {(specificity > 0.7).sum()/data.n_bins*100:.1f}%")
+        print(f"  State-enriched (0.1-0.7): {((specificity >= 0.1) & (specificity <= 0.7)).sum()/data.n_bins*100:.1f}%")
+        print(f"  Universal (<0.1): {(specificity < 0.1).sum()/data.n_bins*100:.1f}%")
+
     # --- analysis.json ---
     meta = {
         "n_bins": data.n_bins,

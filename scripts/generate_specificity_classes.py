@@ -166,7 +166,9 @@ def main():
     ax2.legend(loc="upper right", fontsize=8, ncol=3, framealpha=0.9)
     ax2.set_ylim(0, 105)
 
-    fig.savefig(OUT_PATH, dpi=150, bbox_inches="tight")
+    fig.savefig(OUT_PATH, dpi=300, bbox_inches="tight")
+    from PIL import Image as PILImage
+    PILImage.open(OUT_PATH).convert("RGB").save(OUT_PATH)
     print(f"\nSaved: {OUT_PATH.resolve()}")
     plt.close()
 
