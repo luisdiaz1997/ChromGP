@@ -237,6 +237,7 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
                         valid_mask: np.ndarray | None = None,
                         resolution: int | None = None,
                         start_bp: int = 0,
+                        Y_is_distance: bool = False,
                         output_path: Path | None = None) -> None:
     """1x3 panel: 3D structure colored by group | reconstructed distances | observed.
 
@@ -297,6 +298,10 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
         ]
         ax1.legend(handles=legend_elements, loc="upper left", fontsize=5,
                    framealpha=0.7, handlelength=0.8)
+    else:
+        bin_colors = plt.cm.viridis(np.linspace(0, 1, len(Z)))
+        ax1.scatter(Z[:, 0], Z[:, 1], Z[:, 2], c=bin_colors, s=4,
+                    alpha=0.85, edgecolors="none", zorder=2)
     ax1.view_init(elev=20, azim=-100)
     ax1.set_title("3D Chromatin Structure", fontsize=12)
 
@@ -313,13 +318,19 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
 
     # --- Panel 3: Observed data ---
     observed_square = Y.ndim == 2 and Y.shape[0] == Y.shape[1]
-    if observed_square:
+    if Y_is_distance:
+        Y_obs = Y
+        observed_title = "True Distances"
+        obs_cmap_name = "YlOrRd_r"
+    elif observed_square:
         Y_obs = np.log10(Y + 5e-6)
         observed_title = "Observed Contact Matrix"
+        obs_cmap_name = "YlOrRd"
     else:
         Y_obs = Y
         observed_title = "Observed ChIP-seq Signal"
-    Y_masked, cmap_obs = _dark_nans(Y_obs, "YlOrRd")
+        obs_cmap_name = "YlOrRd"
+    Y_masked, cmap_obs = _dark_nans(Y_obs, obs_cmap_name)
     obs_vmin, obs_vmax = _robust_limits(Y_obs)
     im3 = ax3.matshow(Y_masked, cmap=cmap_obs, aspect="auto", vmin=obs_vmin, vmax=obs_vmax)
     if C is None:
@@ -333,6 +344,8 @@ def plot_reconstruction(Z: np.ndarray, X: np.ndarray, Y: np.ndarray,
     else:
         plt.colorbar(im2, ax=ax2, fraction=0.046)
         plt.colorbar(im3, ax=ax3, fraction=0.046)
+        for _ax in (ax2, ax3):
+            _ax.set_xticks([]); _ax.set_yticks([])
 
     # --- ChromHMM tracks (title placed on h-track axis so it sits above the track) ---
     if C is not None:
@@ -752,8 +765,13 @@ def run(config_path: str, animation: bool = False):
     data.X = data.X / scale
     N = data.n_bins
     X = data.X.numpy()
+    # For synthetic datasets, prefer ground-truth distances (matches notebook gif)
+    z_true_path = region_dir / "preprocessed" / "Z_true.npy"
+    if z_true_path.exists():
+        Z_true = np.load(z_true_path)
+        Y_observed = np.linalg.norm(Z_true[:, None, :] - Z_true[None, :, :], axis=-1)
     # Use full matrix with NaN gaps for observed panel (notebook convention)
-    if data.contact_raw_full is not None:
+    elif data.contact_raw_full is not None:
         Y_observed = data.contact_raw_full.numpy()  # (N_full, N_full) with NaN gaps
     elif data.contact_raw is not None:
         Y_observed = data.contact_raw.numpy()
@@ -765,7 +783,7 @@ def run(config_path: str, animation: bool = False):
             Y_observed = data.Y.numpy().T
             if data.valid_mask is not None:
                 Y_observed = _expand_tracks_to_full(Y_observed, data.valid_mask.numpy())
-    C = data.C.numpy().astype(int) if data.C is not None else None
+    C = data.C.numpy().astype(int) if (data.C is not None and data.n_groups > 1) else None
     group_names = data.group_names
     valid_mask_np = data.valid_mask.numpy() if data.valid_mask is not None else None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -819,6 +837,7 @@ def run(config_path: str, animation: bool = False):
         plot_reconstruction(Z_final, X, Y_observed, C, group_names,
                           valid_mask=valid_mask_np,
                           resolution=resolution, start_bp=start_bp,
+                          Y_is_distance=z_true_path.exists(),
                           output_path=figures_dir / "reconstruction.png")
 
     # --- Training animation (only with --animation) ---
@@ -886,7 +905,7 @@ def run(config_path: str, animation: bool = False):
                 Zs_stack, Y_observed, X, C, group_names, frame_iters,
                 figures_dir / "training_animation.gif",
                 valid_mask=valid_mask_np,
-                step=gif_step, fps=2.5,
+                step=gif_step, fps=5,
             )
     else:
         print("  Skipping training animation (use --animation to generate).")

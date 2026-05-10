@@ -180,7 +180,7 @@ def build_model(
         gp.knn_idz = raw[:, 1:]
 
     else:
-        from gpzoo.gp import SVGP, MGGP_SVGP
+        from gpzoo.gp import SVGP, MGGP_SVGP, WSVGP
         from gpzoo.modules import CholeskyParameter
 
         M = config.model.get("num_inducing", 800)
@@ -191,15 +191,25 @@ def build_model(
                 input_kernel, dim=1, M=M, jitter=jitter,
                 n_groups=n_groups, cholesky_mode=cholesky_mode, diagonal_only=False,
             )
+        elif prior_type == "WSVGP":
+            gp = WSVGP(
+                input_kernel, dim=1, M=M, jitter=jitter,
+                cholesky_mode=cholesky_mode, diagonal_only=False,
+            )
         else:
             gp = SVGP(
                 input_kernel, dim=1, M=M, jitter=jitter,
                 cholesky_mode=cholesky_mode, diagonal_only=False,
             )
 
-        x_min, x_max = X.min().item(), X.max().item()
-        padding = (x_max - x_min) * 0.02
-        Z_init = torch.linspace(x_min + padding, x_max - padding, M).unsqueeze(-1)
+        inducing_init = config.model.get("inducing_init", "linspace").lower()
+        if inducing_init == "random":
+            idx = torch.multinomial(torch.ones(len(X)), num_samples=M, replacement=False)
+            Z_init = X[idx].unsqueeze(-1).clone()
+        else:
+            x_min, x_max = X.min().item(), X.max().item()
+            padding = (x_max - x_min) * 0.02
+            Z_init = torch.linspace(x_min + padding, x_max - padding, M).unsqueeze(-1)
         gp.Z = nn.Parameter(Z_init, requires_grad=False)
 
         if groups:
@@ -212,13 +222,14 @@ def build_model(
 
     # --- 3. ChromGP wrapper ---
     out_kernel_name = config.model.get("output_kernel", "matern32").lower()
+    out_sigma = float(config.model.get("output_sigma", sigma))
     if out_kernel_name == "matern32":
-        output_kernel = batched_Matern32(sigma=sigma, lengthscale=out_ls)
+        output_kernel = batched_Matern32(sigma=out_sigma, lengthscale=out_ls)
     elif out_kernel_name == "matern52":
         from gpzoo.kernels import batched_Matern52
-        output_kernel = batched_Matern52(sigma=sigma, lengthscale=out_ls)
+        output_kernel = batched_Matern52(sigma=out_sigma, lengthscale=out_ls)
     elif out_kernel_name == "rbf":
-        output_kernel = batched_RBF(sigma=sigma, lengthscale=out_ls)
+        output_kernel = batched_RBF(sigma=out_sigma, lengthscale=out_ls)
     else:
         raise ValueError(f"Unknown output_kernel: {out_kernel_name}")
     model = ChromGP(gp, output_kernel, noise=noise, jitter=jitter)
@@ -231,6 +242,8 @@ def build_model(
         input_kernel.lengthscale.requires_grad = False
     output_kernel.sigma.requires_grad = False
     output_kernel.lengthscale.requires_grad = False
+    if not config.model.get("train_noise", True):
+        model.noise.requires_grad = False
 
     return model
 
@@ -346,6 +359,9 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     # SF convention: max_iter is new steps per segment, not cumulative total
     total_steps = start_step + max_iter
 
+    scheduler_name = config.training.get("scheduler", "onecycle")
+    scheduler_name = (scheduler_name or "none").lower() if scheduler_name not in (None, False) else "none"
+
     def _make_scheduler(opt, ts):
         return torch.optim.lr_scheduler.OneCycleLR(
             opt, max_lr=lr, total_steps=ts,
@@ -353,7 +369,7 @@ def run(config_path: str, resume: bool = False, video: bool = False):
             final_div_factor=1e4, cycle_momentum=False,
         )
 
-    scheduler = _make_scheduler(optimizer, total_steps)
+    scheduler = _make_scheduler(optimizer, total_steps) if scheduler_name == "onecycle" else None
 
     # --- Data tensors ---
     X = data.X        # (N,)
@@ -434,7 +450,8 @@ def run(config_path: str, resume: bool = False, video: bool = False):
         loss = -elbo
         loss.backward()
         optimizer.step()
-        scheduler.step()
+        if scheduler is not None:
+            scheduler.step()
 
         losses.append(elbo.item())
 
@@ -448,7 +465,7 @@ def run(config_path: str, resume: bool = False, video: bool = False):
                 Z_lengthscales.append(model.gp.kernel.lengthscale.item())
             Z_steps.append(step)
 
-        current_lr = scheduler.get_last_lr()[0]
+        current_lr = scheduler.get_last_lr()[0] if scheduler is not None else lr
         pbar.set_postfix({"ELBO": f"{elbo.item():.3f}", "lr": f"{current_lr:.1e}"})
 
     train_time = time.perf_counter() - t0
