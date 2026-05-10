@@ -72,10 +72,11 @@ def _save_rgb(fig, path: Path):
 
 
 def run_train():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")  # CPU for numerical stability
     torch.manual_seed(42)
 
-    N = 1000; tau = 0.1; nu = 50.0; lr = 0.02; n_steps = 10000
+    N = 1000; tau = 0.1; nu = 50.0; n_steps = 10000
+    lr = 0.02
     Z_true = make_helix(N, radius=1.0, turns=4)
     Z_true = Z_true - Z_true.mean(0)
     Z_true = Z_true / Z_true.norm(dim=1).max()
@@ -86,20 +87,16 @@ def run_train():
     contacts = torch.tril(contacts) + torch.tril(contacts, -1).T
 
     X = torch.linspace(0, 2*np.pi*4, N)
-    M = N; jitter = 1e-5
+    M = 800; jitter = 1e-5
 
     idx = torch.sort(torch.multinomial(torch.ones(N), M, replacement=False))[0]
     Z_ind = X[idx]
 
     kernel_gp = batched_RBF(sigma=1.0, lengthscale=0.7)
     gp = SVGP(kernel_gp, M=M, jitter=jitter)
-    gp.Lu = nn.Parameter(1e-2 * torch.eye(M).expand(3, M, M).clone())
+    gp.Lu = nn.Parameter(1e-2 * torch.eye(M).clone())
     gp.Z = nn.Parameter(Z_ind.unsqueeze(-1), requires_grad=False)
-    mu_init = torch.squeeze(torch.stack((
-        torch.sin(np.pi * gp.Z / 10.0),
-        torch.cos(np.pi * gp.Z / 10.0),
-        torch.sin(np.pi * gp.Z / 10.0),
-    )))
+    mu_init = 0.1 * torch.randn(3, M)
     gp.mu = nn.Parameter(mu_init)
 
     out_kernel = batched_RBF(sigma=1.0, lengthscale=0.7)
@@ -109,6 +106,8 @@ def run_train():
     model.gp.kernel.sigma.requires_grad = False
     model.kernel.lengthscale.requires_grad = False
     model.kernel.sigma.requires_grad = False
+    # Freeze Lu for first third of training (matches notebook warmup)
+    model.gp.Lu.requires_grad = False
 
     model = model.to(device)
     opt = optim.Adam(model.parameters(), lr=lr)
@@ -117,6 +116,11 @@ def run_train():
     print(f"Training N={N} M={M}")
     model.train()
     for step in range(n_steps):
+        # Unfreeze Lu after 1/3 of training (notebook warmup)
+        if step == n_steps // 3:
+            model.gp.Lu.requires_grad = True
+            print(f"  Unfreezing Lu at step {step}")
+
         opt.zero_grad()
         pY, qZ, qU, pU = model(X.to(device).squeeze())
         yn = contacts.to(device) - contacts.to(device).mean(dim=1, keepdims=True)

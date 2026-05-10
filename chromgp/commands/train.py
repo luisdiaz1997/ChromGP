@@ -210,7 +210,16 @@ def build_model(
         gp.mu = nn.Parameter(torch.randn(L, M) * 1.0)
 
     # --- 3. ChromGP wrapper ---
-    output_kernel = batched_Matern32(sigma=sigma, lengthscale=out_ls)
+    out_kernel_name = config.model.get("output_kernel", "matern32").lower()
+    if out_kernel_name == "matern32":
+        output_kernel = batched_Matern32(sigma=sigma, lengthscale=out_ls)
+    elif out_kernel_name == "matern52":
+        from gpzoo.kernels import batched_Matern52
+        output_kernel = batched_Matern52(sigma=sigma, lengthscale=out_ls)
+    elif out_kernel_name == "rbf":
+        output_kernel = batched_RBF(sigma=sigma, lengthscale=out_ls)
+    else:
+        raise ValueError(f"Unknown output_kernel: {out_kernel_name}")
     model = ChromGP(gp, output_kernel, noise=noise, jitter=jitter)
 
     # --- 4. Freeze kernel hyperparams ---

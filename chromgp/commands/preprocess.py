@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from ..config import Config
-from ..datasets import ChIPSeqLoader, HiCLoader, GenomicData
+from ..datasets import ChIPSeqLoader, HiCLoader, SyntheticLoader, GenomicData
 
 
 def _filter_nans(data: GenomicData) -> GenomicData:
@@ -77,6 +77,8 @@ def _filter_nans(data: GenomicData) -> GenomicData:
 def _select_loader(preprocessing: dict):
     """Select the raw-data loader from preprocessing fields."""
     assay = preprocessing.get("assay") or preprocessing.get("data_type")
+    if assay in {"synthetic", "synthetic_helix", "synthetic_multi_helix"}:
+        return SyntheticLoader()
     if assay in {"chipseq", "chip-seq", "bigwig"} or "bigwig_paths" in preprocessing:
         return ChIPSeqLoader()
     return HiCLoader()
@@ -133,6 +135,11 @@ def run(config_path: str):
     # Save GC content per bin
     if data.gc is not None:
         np.save(output_dir / "gc.npy", data.gc.numpy())  # (N,)
+
+    # Save synthetic ground-truth positions if present (set by SyntheticLoader)
+    z_true = data.metadata.pop("Z_true", None) if data.metadata else None
+    if z_true is not None:
+        np.save(output_dir / "Z_true.npy", np.asarray(z_true))
 
     # Save group codes (C)
     if data.C is not None:
