@@ -439,11 +439,16 @@ def create_training_animation(
     ax3.matshow(Y_masked, cmap=cmap_obs, aspect="auto", vmin=obs_vmin, vmax=obs_vmax)
     ax3.set_title("Observed Contact Matrix", fontsize=12)
 
-    final_recon = torch.cdist(torch.tensor(Zs[frame_indices[-1]]),
-                              torch.tensor(Zs[frame_indices[-1]])).numpy()
-    if valid_mask is not None:
-        final_recon = _expand_to_full(final_recon, valid_mask)
-    recon_vmin, recon_vmax = _robust_limits(final_recon)
+    # Compute global vmin/vmax across a subset of frames so early collapsed
+    # Z's don't get squashed against the final frame's range.
+    sample_idxs = frame_indices[:: max(1, len(frame_indices) // 8)]
+    sample_dists = []
+    for fi in sample_idxs:
+        d = torch.cdist(torch.tensor(Zs[fi]), torch.tensor(Zs[fi])).numpy()
+        if valid_mask is not None:
+            d = _expand_to_full(d, valid_mask)
+        sample_dists.append(d)
+    recon_vmin, recon_vmax = _robust_limits(np.concatenate([d.ravel() for d in sample_dists]))
 
     # Fixed palette: 253 turbo + gray + white + black (SF convention)
     turbo_colors = (mcm.turbo(np.linspace(0, 1, 253))[:, :3] * 255).astype(np.uint8)
@@ -765,13 +770,8 @@ def run(config_path: str, animation: bool = False):
     data.X = data.X / scale
     N = data.n_bins
     X = data.X.numpy()
-    # For synthetic datasets, prefer ground-truth distances (matches notebook gif)
-    z_true_path = region_dir / "preprocessed" / "Z_true.npy"
-    if z_true_path.exists():
-        Z_true = np.load(z_true_path)
-        Y_observed = np.linalg.norm(Z_true[:, None, :] - Z_true[None, :, :], axis=-1)
     # Use full matrix with NaN gaps for observed panel (notebook convention)
-    elif data.contact_raw_full is not None:
+    if data.contact_raw_full is not None:
         Y_observed = data.contact_raw_full.numpy()  # (N_full, N_full) with NaN gaps
     elif data.contact_raw is not None:
         Y_observed = data.contact_raw.numpy()
@@ -837,7 +837,6 @@ def run(config_path: str, animation: bool = False):
         plot_reconstruction(Z_final, X, Y_observed, C, group_names,
                           valid_mask=valid_mask_np,
                           resolution=resolution, start_bp=start_bp,
-                          Y_is_distance=z_true_path.exists(),
                           output_path=figures_dir / "reconstruction.png")
 
     # --- Training animation (only with --animation) ---
