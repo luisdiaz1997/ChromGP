@@ -82,6 +82,39 @@ def figures(config, animation):
     fig_cmd.run(config, animation=animation)
 
 
+@cli.group()
+def baseline():
+    """Run head-to-head baseline 3D-recon methods (PoisMS, Pastis)."""
+    pass
+
+
+@baseline.command("poisms")
+@click.option("--config", "-c", required=True, type=click.Path(exists=True), help="Path to config YAML")
+@click.option("--df", type=int, default=5, show_default=True,
+              help="B-spline degrees of freedom (PoisMS paper default 5)")
+@click.option("--maxepoch", type=int, default=100, show_default=True,
+              help="PoisMS outer-loop epoch cap")
+def baseline_poisms(config, df, maxepoch):
+    """Fit official PoisMS (R) on the Hi-C matrix and FISH-validate."""
+    from .baselines import poisms as poisms_cmd
+    poisms_cmd.run(config, df=df, maxepoch=maxepoch)
+
+
+@baseline.command("summary")
+@click.option("--dataset-dir", type=click.Path(exists=True), required=True,
+              help="e.g. outputs/4DNFIJTOIGOI")
+@click.option("--regions", default="chr20,chr21,chr22", show_default=True,
+              help="Comma-separated region slugs")
+@click.option("--methods", default="svgp,poisms", show_default=True,
+              help="Comma-separated method slugs (subdirs under each region)")
+def baseline_summary(dataset_dir, regions, methods):
+    """Print a comparison table of FISH metrics across methods × regions."""
+    from .baselines.summary import render_summary
+    render_summary(dataset_dir,
+                   [r.strip() for r in regions.split(",") if r.strip()],
+                   [m.strip() for m in methods.split(",") if m.strip()])
+
+
 @cli.command()
 @click.argument("stages", nargs=-1, required=True)
 @click.option("--config", "-c", required=True, type=click.Path(exists=True),
