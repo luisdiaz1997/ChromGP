@@ -22,7 +22,7 @@ def _make_helix(N: int, radius: float, turns: float) -> torch.Tensor:
                         t / (torch.pi * turns)], dim=1)
 
 
-def _poisson_contacts(Z: torch.Tensor, replicates: int = 16, z_noise: float = 0.01) -> torch.Tensor:
+def _poisson_contacts_spiral(Z: torch.Tensor, replicates: int = 16, z_noise: float = 0.01) -> torch.Tensor:
     """Sum of `replicates` symmetric Poisson contact maps from noisy copies of Z.
 
     Notebook convention: rate = 1 / (1 + D^2).
@@ -35,6 +35,18 @@ def _poisson_contacts(Z: torch.Tensor, replicates: int = 16, z_noise: float = 0.
         samples = torch.poisson(lam)
         total = total + (torch.tril(samples) + torch.tril(samples, -1).T)
     return total
+
+
+def _poisson_contacts_hastie(Z: torch.Tensor, beta: float = 5.0) -> torch.Tensor:
+    """Single symmetric Poisson contact map under the PoisMS (Hastie et al. 2022) model.
+
+    log lambda_ij = beta - ||x_i - x_j||^2
+    C_ij ~ Poisson(lambda_ij)
+    """
+    D = torch.cdist(Z, Z)
+    lam = torch.exp(beta - D**2)
+    samples = torch.poisson(lam)
+    return torch.tril(samples) + torch.tril(samples, -1).T
 
 
 class SyntheticLoader:
@@ -71,9 +83,14 @@ class SyntheticLoader:
         Z_true = Z_true - Z_true.mean(0)
         Z_true = Z_true / Z_true.norm(dim=1).max()
 
-        replicates = int(preprocessing.get("replicates", 16))
-        z_noise = float(preprocessing.get("z_noise", 0.01))
-        contacts = _poisson_contacts(Z_true, replicates=replicates, z_noise=z_noise)
+        contact_model = str(preprocessing.get("contact_model", "spiral")).lower()
+        if contact_model == "hastie":
+            beta = float(preprocessing.get("beta", 5.0))
+            contacts = _poisson_contacts_hastie(Z_true, beta=beta)
+        else:
+            replicates = int(preprocessing.get("replicates", 16))
+            z_noise = float(preprocessing.get("z_noise", 0.01))
+            contacts = _poisson_contacts_spiral(Z_true, replicates=replicates, z_noise=z_noise)
 
         X = torch.linspace(0.0, x_max, N)
 

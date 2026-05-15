@@ -97,6 +97,22 @@ Fine-grained ChromHMM states are merged into 5 coarse biological groups **before
 
 ### Notebooks
 
+## Identifiability: freeze `output_sigma` when training noise + Z
+
+ChromGP's outer Gaussian likelihood is
+```
+y_d ~ N(0,  σ²_out · K_kernel(Z, Z)  +  σ²_n · I)
+```
+With `train_output_sigma: true` **and** noise trainable, the two parameters co-conspire: `σ²_out` can grow to absorb data-row variance, which lets `σ²_n` also grow, which lets `Z` spread to compensate. The optimizer then drives the input lengthscale to ~0 and the kernel sees no usable structure — RMSD on synthetic helix recovery goes from ~0.08 to ~0.67. (Concrete failure mode observed on the Hastie/PoisMS β=5 synthetic data.)
+
+**Rule of thumb (from working through this with the Hastie data):**
+- Default to `train_output_sigma: false` (frozen at 1.0) unless you have a clear reason to learn it.
+- Trainable: noise σ_n, input lengthscale ℓ_in, variational `q(z)` params.
+- Frozen: σ_out, σ_in, output lengthscale ℓ_out (latent coord scale, σ_in, ℓ_out are jointly unidentifiable — keep at least one fixed to anchor the others).
+- If you need more flexibility, train ℓ_out *before* σ_out, and only after the rest is stable.
+
+The `synthetic_helix` (spiral-style) config happened to work with σ_out trainable because the data's row variance lands close enough to σ_out=1's natural scale that the feedback loop didn't take off. Don't take that as evidence the knob is safe in general.
+
 ## Git conventions
 
 **Never commit or push unless explicitly told to.** Make code changes freely, but always wait for the user to say "commit" or "push" before running any `git commit` or `git push` command.
