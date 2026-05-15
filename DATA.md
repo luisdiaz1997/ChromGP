@@ -73,6 +73,21 @@ H3K27me3 (canonical Polycomb/PRC2 mark) gives it strong power to resolve repress
 into the 5 distinct Polycomb sub-states, yielding ~10% Polycomb coverage genome-wide vs
 ~1.8% with the ENCODE 15-state model on chr9.
 
+## Multiplex FISH (Wang et al. 2016)
+
+External 3D structural validation. Same dataset used by PoisMS / DBMS so
+ChromGP-vs-imaging numbers are directly comparable to Tuzhilina et al.
+See [`docs/fish.md`](docs/fish.md) for format, probe table, and citation.
+
+| Cell line | Chromosome | 4DN file | Local file |
+|-----------|-----------|----------|------------|
+| IMR90 | chr20 (30 TADs, GRCh38) | `4DNFIES5RS7Q` | `/gladstone/engelhardt/lab/lchumpitaz/datasets/fish/wang2016/4DNFIES5RS7Q_chr20.csv` |
+| IMR90 | chr21 (34 TADs, ~10.4–46.5 Mb, GRCh38) | `4DNFIW2N41FQ` | `/gladstone/engelhardt/lab/lchumpitaz/datasets/fish/wang2016/4DNFIW2N41FQ_chr21.csv` |
+| IMR90 | chr22 (27 TADs, GRCh38) | `4DNFIXRYL1SK` | `/gladstone/engelhardt/lab/lchumpitaz/datasets/fish/wang2016/4DNFIXRYL1SK_chr22.csv` |
+
+Xi (`4DNFIQVE9EQA`) and Xa (`4DNFI9PGBB4I`) traces are also available from
+the same publication but our Hi-C runs don't yet include the X chromosomes.
+
 ## Reference genome
 
 | File | Path |

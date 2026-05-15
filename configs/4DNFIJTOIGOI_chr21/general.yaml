@@ -15,6 +15,9 @@ preprocessing:
   chromhmm_bed: /gladstone/engelhardt/lab/lchumpitaz/datasets/chromhmm/E017_15_coreMarks_hg38lift_mnemonics.bed
   chromhmm_states: null
   gc_reference: /gladstone/engelhardt/home/lchumpitaz/gitclones/ChromGP/notebooks/hg38.fa
+  fish:
+    path: /gladstone/engelhardt/lab/lchumpitaz/datasets/fish/wang2016/4DNFIW2N41FQ_chr21.csv
+    chrom: chr21
 
 model:
   n_components: 3

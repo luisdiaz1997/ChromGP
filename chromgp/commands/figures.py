@@ -803,6 +803,81 @@ def plot_pc1_axis_alignment(Z: np.ndarray, pc1: np.ndarray, direction: np.ndarra
 
 
 # ---------------------------------------------------------------------------
+# FISH validation comparison figure
+# ---------------------------------------------------------------------------
+
+def plot_fish_comparison(
+    fish_distance: np.ndarray,
+    chromgp_distance: np.ndarray,
+    output_path: Path,
+    spearman: float | None = None,
+    log_pearson: float | None = None,
+    rmsd: float | None = None,
+    title_suffix: str = "",
+) -> None:
+    """Three-panel FISH-vs-ChromGP figure.
+
+    Args:
+        fish_distance: (P, P) FISH median pairwise distance matrix (microns).
+        chromgp_distance: (P, P) ChromGP predicted distance on FISH probe bins.
+        output_path: PNG path.
+        rmsd: optional Procrustes RMSD to print in panel 3 title.
+        spearman: optional pairwise Spearman r to print in panel 3 title.
+        title_suffix: appended to the suptitle (e.g. " — IMR90 chr21").
+    """
+    fish = np.asarray(fish_distance, dtype=float)
+    pred = np.asarray(chromgp_distance, dtype=float)
+    P = fish.shape[0]
+
+    fig = plt.figure(figsize=(15, 5))
+    gs = gridspec.GridSpec(1, 3, width_ratios=[1, 1, 1], wspace=0.35)
+
+    # Panel 1: FISH median distances
+    ax1 = fig.add_subplot(gs[0, 0])
+    fish_masked, cmap1 = _dark_nans(fish, "YlOrRd")
+    vmin1, vmax1 = _robust_limits(fish, 2, 98)
+    im1 = ax1.imshow(fish_masked, cmap=cmap1, vmin=vmin1, vmax=vmax1, aspect="equal")
+    ax1.set_title("FISH median pairwise distance (μm)", fontsize=11)
+    ax1.set_xlabel("Probe index")
+    ax1.set_ylabel("Probe index")
+    fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+
+    # Panel 2: ChromGP predicted distances on same probes
+    ax2 = fig.add_subplot(gs[0, 1])
+    pred_masked, cmap2 = _dark_nans(pred, "YlOrRd")
+    vmin2, vmax2 = _robust_limits(pred, 2, 98)
+    im2 = ax2.imshow(pred_masked, cmap=cmap2, vmin=vmin2, vmax=vmax2, aspect="equal")
+    ax2.set_title("ChromGP predicted distance (a.u.)", fontsize=11)
+    ax2.set_xlabel("Probe index")
+    fig.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+
+    # Panel 3: scatter of upper-triangle distances
+    ax3 = fig.add_subplot(gs[0, 2])
+    iu = np.triu_indices(P, k=1)
+    fv = fish[iu]
+    pv = pred[iu]
+    mask = np.isfinite(fv) & np.isfinite(pv)
+    ax3.scatter(fv[mask], pv[mask], s=14, alpha=0.55, color="steelblue",
+                edgecolor="none")
+    ax3.set_xlabel("FISH median distance (μm)")
+    ax3.set_ylabel("ChromGP predicted distance (a.u.)")
+    bits = []
+    if spearman is not None and np.isfinite(spearman):
+        bits.append(f"Spearman r = {spearman:+.3f}")
+    if log_pearson is not None and np.isfinite(log_pearson):
+        bits.append(f"log-Pearson = {log_pearson:+.3f}")
+    if rmsd is not None and np.isfinite(rmsd):
+        bits.append(f"RMSD = {rmsd:.3f}")
+    ax3.set_title("Pairwise distance scatter\n" + "  |  ".join(bits) if bits
+                  else "Pairwise distance scatter", fontsize=11)
+    ax3.grid(True, alpha=0.3)
+
+    fig.suptitle(f"FISH validation (Wang 2016){title_suffix}",
+                 fontsize=13, y=1.02)
+    _save_rgb(fig, output_path)
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -902,6 +977,40 @@ def run(config_path: str, animation: bool = False):
                           valid_mask=valid_mask_np,
                           resolution=resolution, start_bp=start_bp,
                           output_path=figures_dir / "reconstruction.png")
+
+    # --- FISH comparison (when analyze.py wrote FISH artifacts) ---
+    fish_dist_path = output_dir / "fish_distance.npy"
+    fish_pred_path = output_dir / "fish_predicted_distance.npy"
+    fish_positions_path = output_dir / "fish_probe_positions.npy"
+    if fish_dist_path.exists() and fish_pred_path.exists() and fish_positions_path.exists():
+        print("Plotting FISH comparison...")
+        fish_dist = np.load(fish_dist_path)
+        probe_pred_dist = np.load(fish_pred_path)
+        probe_positions = np.load(fish_positions_path)
+        # Drop probes with no overlapping ChromGP bins (NaN rows).
+        valid = np.all(np.isfinite(probe_positions), axis=1)
+        fish_v = fish_dist[np.ix_(valid, valid)]
+        pred_v = probe_pred_dist[np.ix_(valid, valid)]
+
+        analysis_json = output_dir / "analysis.json"
+        rmsd = spearman = log_pearson = None
+        if analysis_json.exists():
+            with open(analysis_json) as f:
+                meta = json.load(f)
+            fv = meta.get("fish_validation") or {}
+            spearman = fv.get("pairwise_spearman")
+            log_pearson = fv.get("log_pairwise_pearson")
+            rmsd = fv.get("procrustes_rmsd_unitscaled")
+
+        chrom_label = ""
+        if isinstance(prep.get("region"), str):
+            chrom_label = f" — {prep['region']}"
+        plot_fish_comparison(
+            fish_v, pred_v,
+            output_path=figures_dir / "fish_comparison.png",
+            spearman=spearman, log_pearson=log_pearson, rmsd=rmsd,
+            title_suffix=chrom_label,
+        )
 
     # --- Training animation (only with --animation) ---
     if animation:

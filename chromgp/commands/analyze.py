@@ -16,9 +16,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from ..analysis import scc, scc_groupwise
+from ..analysis import scc, scc_groupwise, fish_validation
 from ..config import Config
-from ..datasets import load_preprocessed
+from ..datasets import load_preprocessed, load_wang2016
 
 
 def _compute_pc1_3d_alignment(Y: np.ndarray, Z: np.ndarray) -> dict:
@@ -227,6 +227,67 @@ def run(config_path: str):
         else:
             print(f"  Skipping PC1: Y shape {Y_for_pc.shape} doesn't match (N,N)")
 
+    # --- FISH validation (Wang 2016 multiplex FISH; opt-in via config) ---
+    fish_results = None
+    fish_cfg = config.preprocessing.get("fish")
+    if fish_cfg is not None and Z_uncond.shape[1] == 3:
+        print("\nValidating against FISH data...")
+        fish_path = fish_cfg.get("path") if isinstance(fish_cfg, dict) else fish_cfg
+        fish_chrom = fish_cfg.get("chrom") if isinstance(fish_cfg, dict) else None
+        resolution = config.preprocessing.get("resolution", 25000)
+        ref = load_wang2016(fish_path, chrom=fish_chrom)
+        # PoisMS/DBMS probe-footprint aggregation: each probe spans ~100 kb
+        # (~4 bins at 25 kb), so the probe-level 3D coordinate is the
+        # *average* of ChromGP coordinates over every bin whose midpoint
+        # falls inside the probe interval. Bins outside any probe footprint
+        # are ignored; probes whose footprint falls in a cooler-trimmed
+        # region (centromere / short arm) get no overlapping bins and are
+        # dropped downstream as NaN rows.
+        bin_midpoints_bp = (data.X.cpu().numpy() * scale).astype(np.int64)
+        bin_index_lists = ref.bin_indices_per_probe(bin_midpoints_bp, pad_bp=resolution // 2)
+        probe_positions = np.full((ref.n_probes, 3), np.nan, dtype=float)
+        n_bins_per_probe = np.zeros(ref.n_probes, dtype=int)
+        for p, bins in enumerate(bin_index_lists):
+            n_bins_per_probe[p] = len(bins)
+            if len(bins) > 0:
+                probe_positions[p] = Z_uncond[bins].mean(axis=0)
+
+        fish_med = ref.median_distance_matrix()
+        fish_metrics = fish_validation(fish_med, probe_positions)
+
+        # Probe-level predicted distance matrix (for the figures stage).
+        diff = probe_positions[:, None, :] - probe_positions[None, :, :]
+        probe_pred_dist = np.linalg.norm(diff, axis=-1)
+
+        np.save(output_dir / "fish_distance.npy", fish_med)
+        np.save(output_dir / "fish_probe_positions.npy", probe_positions)
+        np.save(output_dir / "fish_predicted_distance.npy", probe_pred_dist)
+        np.save(output_dir / "fish_probe_midpoints.npy", ref.probe_midpoints)
+        np.save(output_dir / "fish_bins_per_probe.npy", n_bins_per_probe)
+
+        fish_results = {
+            "source": ref.source,
+            "chrom": ref.chrom,
+            "assembly": ref.assembly,
+            "n_cells": ref.n_cells,
+            "n_probes_total": ref.n_probes,
+            "n_probes_used": fish_metrics["n_probes_used"],
+            "n_pairs_used": fish_metrics["n_pairs_used"],
+            "pairwise_spearman": fish_metrics["pairwise_spearman"],
+            "log_pairwise_pearson": fish_metrics["log_pairwise_pearson"],
+            "procrustes_rmsd_unitscaled": fish_metrics["procrustes_rmsd_unitscaled"],
+            "resolution": resolution,
+            "median_bins_per_probe": int(np.median(n_bins_per_probe)),
+            "mean_bins_per_probe": float(np.mean(n_bins_per_probe)),
+        }
+        print(f"  FISH probes used: {fish_metrics['n_probes_used']}/{ref.n_probes} "
+              f"({fish_metrics['n_pairs_used']} pairs); "
+              f"median bins/probe = {fish_results['median_bins_per_probe']}")
+        print(f"  FISH pairwise Spearman r: {fish_metrics['pairwise_spearman']:+.4f}  (headline)")
+        print(f"  FISH log-distance Pearson r: {fish_metrics['log_pairwise_pearson']:+.4f}")
+        print(f"  FISH Procrustes RMSD (unit-scaled, aux): "
+              f"{fish_metrics['procrustes_rmsd_unitscaled']:.4f}")
+
     # --- analysis.json ---
     meta = {
         "n_bins": data.n_bins,
@@ -236,6 +297,7 @@ def run(config_path: str):
         "model_name": model_name,
         "scc": scc_results,
         "pc1_3d_alignment": pc1_meta,
+        "fish_validation": fish_results,
     }
     with open(output_dir / "analysis.json", "w") as f:
         json.dump(meta, f, indent=2, default=str)
