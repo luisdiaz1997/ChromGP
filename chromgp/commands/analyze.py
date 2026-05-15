@@ -21,6 +21,41 @@ from ..config import Config
 from ..datasets import load_preprocessed
 
 
+def _compute_pc1_3d_alignment(Y: np.ndarray, Z: np.ndarray) -> dict:
+    """PC1 of the Hi-C correlation matrix + best linear 3D direction.
+
+    Returns a dict with:
+      pc1            (N,) z-scored PC1 of corr(Y)
+      direction      (3,) unit vector in 3D that best aligns with pc1
+      direction_r    Pearson r of (Z @ direction) with pc1
+      r_per_axis     dict {x,y,z} -> Pearson r with pc1
+      r_radial       Pearson r of ||Z - mean|| with pc1
+    """
+    Y_safe = np.nan_to_num(Y, nan=np.nanmean(Y))
+    corr = np.nan_to_num(np.corrcoef(Y_safe), nan=0.0)
+    eigvals, eigvecs = np.linalg.eigh(corr)
+    pc1 = eigvecs[:, -1] * np.sqrt(max(float(eigvals[-1]), 0.0))
+    pc1 = (pc1 - pc1.mean()) / (pc1.std() + 1e-12)
+
+    Z_c = Z - Z.mean(0)
+    r = np.linalg.norm(Z_c, axis=1)
+    r_per_axis = {ax: float(np.corrcoef(Z_c[:, i], pc1)[0, 1]) for i, ax in enumerate("xyz")}
+    r_radial = float(np.corrcoef(r, pc1)[0, 1])
+
+    coef, *_ = np.linalg.lstsq(Z_c, pc1, rcond=None)
+    direction = coef / (np.linalg.norm(coef) + 1e-12)
+    proj = Z_c @ direction
+    direction_r = float(np.corrcoef(proj, pc1)[0, 1])
+
+    return {
+        "pc1": pc1.astype(np.float32),
+        "direction": direction.astype(np.float32),
+        "direction_r": direction_r,
+        "r_per_axis": r_per_axis,
+        "r_radial": r_radial,
+    }
+
+
 def _compute_groupwise_positions(
     model: nn.Module,
     X: torch.Tensor,
@@ -170,6 +205,28 @@ def run(config_path: str):
         print(f"  State-enriched (0.1-0.7): {((specificity >= 0.1) & (specificity <= 0.7)).sum()/data.n_bins*100:.1f}%")
         print(f"  Universal (<0.1): {(specificity < 0.1).sum()/data.n_bins*100:.1f}%")
 
+    # --- Hi-C PC1 + 3D axis alignment ---
+    pc1_meta = None
+    if data.contact_raw is not None and Z_uncond.shape[1] == 3:
+        print("\nComputing Hi-C PC1 and 3D axis alignment...")
+        Y_for_pc = data.Y.cpu().numpy() if isinstance(data.Y, torch.Tensor) else data.Y
+        if Y_for_pc.ndim == 2 and Y_for_pc.shape[0] == Y_for_pc.shape[1] == Z_uncond.shape[0]:
+            res = _compute_pc1_3d_alignment(Y_for_pc, Z_uncond)
+            np.save(output_dir / "pc1.npy", res["pc1"])
+            pc1_meta = {
+                "direction": res["direction"].tolist(),
+                "direction_r": res["direction_r"],
+                "direction_r2": res["direction_r"] ** 2,
+                "r_per_axis": res["r_per_axis"],
+                "r_radial": res["r_radial"],
+            }
+            print(f"  PC1 best-fit 3D direction: {[round(v, 3) for v in pc1_meta['direction']]}")
+            print(f"  r(proj, PC1) = {res['direction_r']:+.3f}  (R² = {pc1_meta['direction_r2']:.3f})")
+            print(f"  per-axis r: {pc1_meta['r_per_axis']}")
+            print(f"  r(||Z||, PC1) = {res['r_radial']:+.3f}")
+        else:
+            print(f"  Skipping PC1: Y shape {Y_for_pc.shape} doesn't match (N,N)")
+
     # --- analysis.json ---
     meta = {
         "n_bins": data.n_bins,
@@ -178,6 +235,7 @@ def run(config_path: str):
         "use_groups": use_groups,
         "model_name": model_name,
         "scc": scc_results,
+        "pc1_3d_alignment": pc1_meta,
     }
     with open(output_dir / "analysis.json", "w") as f:
         json.dump(meta, f, indent=2, default=str)

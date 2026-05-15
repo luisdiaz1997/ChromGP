@@ -738,6 +738,70 @@ def plot_groupwise_reconstructions(
     _save_rgb(fig, output_path)
 
 
+def plot_pc1_3d(Z: np.ndarray, pc1: np.ndarray, output_path: Path,
+                 views=((20, 30), (20, 120), (90, 0))) -> None:
+    """3D scatter of Z coloured by Hi-C PC1, rendered from multiple angles."""
+    Z_c = Z - Z.mean(0)
+    r = np.linalg.norm(Z_c, axis=1)
+    radial_r = np.corrcoef(r, pc1)[0, 1]
+    vmax = float(np.percentile(np.abs(pc1), 99))
+    fig = plt.figure(figsize=(5 * len(views), 5))
+    for i, (elev, azim) in enumerate(views):
+        ax = fig.add_subplot(1, len(views), i + 1, projection="3d")
+        sc = ax.scatter(Z_c[:, 0], Z_c[:, 1], Z_c[:, 2], c=pc1, cmap="coolwarm",
+                          vmin=-vmax, vmax=vmax, s=6, alpha=0.85, edgecolors="none")
+        ax.view_init(elev=elev, azim=azim)
+        ax.set_title(f"elev={elev}, azim={azim}", fontsize=9)
+    fig.colorbar(sc, ax=fig.axes, shrink=0.5, label="Hi-C PC1 (z)")
+    fig.suptitle(f"3D structure coloured by Hi-C PC1   (Pearson r(‖Z‖, PC1) = {radial_r:+.3f})",
+                  fontsize=12)
+    _save_rgb(fig, output_path)
+    plt.close(fig)
+
+
+def plot_pc1_axis_alignment(Z: np.ndarray, pc1: np.ndarray, direction: np.ndarray,
+                              direction_r: float, r_per_axis: dict,
+                              output_path: Path) -> None:
+    """Three-panel figure: 3D structure + PC1 axis, PC1 vs y, PC1 vs best 3D projection."""
+    Z_c = Z - Z.mean(0)
+    proj = Z_c @ direction
+    vmax = float(np.percentile(np.abs(pc1), 99))
+
+    fig = plt.figure(figsize=(14, 5))
+
+    ax1 = fig.add_subplot(1, 3, 1, projection="3d")
+    ax1.scatter(Z_c[:, 0], Z_c[:, 1], Z_c[:, 2], c=pc1, cmap="coolwarm",
+                  vmin=-vmax, vmax=vmax, s=6, alpha=0.9, edgecolors="none")
+    span = float(np.linalg.norm(Z_c, axis=1).max())
+    ax1.plot([-span * direction[0], span * direction[0]],
+              [-span * direction[1], span * direction[1]],
+              [-span * direction[2], span * direction[2]],
+              color="black", lw=2)
+    ax1.view_init(elev=20, azim=30)
+    ax1.set_title("3D structure + PC1 axis (black)", fontsize=10)
+
+    ax2 = fig.add_subplot(1, 3, 2)
+    ax2.scatter(Z_c[:, 1], pc1, c=pc1, cmap="coolwarm", vmin=-vmax, vmax=vmax,
+                  s=6, alpha=0.85, edgecolors="none")
+    ax2.set_xlabel("y coordinate")
+    ax2.set_ylabel("Hi-C PC1 (z)")
+    ax2.set_title(f"PC1 vs y-axis   r = {r_per_axis['y']:+.3f}", fontsize=10)
+    ax2.grid(alpha=0.3)
+
+    ax3 = fig.add_subplot(1, 3, 3)
+    sc = ax3.scatter(proj, pc1, c=pc1, cmap="coolwarm", vmin=-vmax, vmax=vmax,
+                      s=6, alpha=0.85, edgecolors="none")
+    ax3.set_xlabel("projection onto best 3D direction")
+    ax3.set_ylabel("Hi-C PC1 (z)")
+    ax3.set_title(f"PC1 vs best linear projection   r = {direction_r:+.3f}, R² = {direction_r**2:.2f}",
+                    fontsize=10)
+    ax3.grid(alpha=0.3)
+    fig.colorbar(sc, ax=[ax2, ax3], shrink=0.7, label="PC1 (z)")
+    fig.suptitle("Hi-C PC1 alignment with 3D structure", fontsize=12)
+    _save_rgb(fig, output_path)
+    plt.close(fig)
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -932,5 +996,29 @@ def run(config_path: str, animation: bool = False):
             )
     else:
         print("  Skipping groupwise figures — run analyze first.")
+
+    # --- PC1 + 3D alignment figures (reads analyze output) ---
+    pc1_path = output_dir / "pc1.npy"
+    uncond_path = output_dir / "groupwise_positions" / "unconditional.npy"
+    analysis_path = output_dir / "analysis.json"
+    if pc1_path.exists() and uncond_path.exists() and analysis_path.exists():
+        import json as _json
+        pc1 = np.load(pc1_path)
+        Z_uncond = np.load(uncond_path)
+        with open(analysis_path) as f:
+            meta = _json.load(f)
+        pc1_meta = meta.get("pc1_3d_alignment")
+        if pc1_meta and Z_uncond.shape[1] == 3:
+            plot_pc1_3d(Z_uncond, pc1, figures_dir / "pc1_3d.png")
+            plot_pc1_axis_alignment(
+                Z_uncond, pc1,
+                direction=np.asarray(pc1_meta["direction"], dtype=float),
+                direction_r=float(pc1_meta["direction_r"]),
+                r_per_axis=pc1_meta["r_per_axis"],
+                output_path=figures_dir / "pc1_axis_alignment.png",
+            )
+            print(f"  PC1 figures written (direction R² = {pc1_meta['direction_r2']:.3f})")
+    else:
+        print("  Skipping PC1 figures — run analyze first on Hi-C data.")
 
     print("\nFigures complete.")
