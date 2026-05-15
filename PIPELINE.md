@@ -5,12 +5,16 @@
 Build a CLI-first pipeline mirroring `Spatial-Factorization`'s architecture, adapted for Hi-C (and later ChIP-seq) inputs. The user runs:
 
 ```bash
-chromgp generate   -c configs/<dataset>/general.yaml   # expand to per-model configs
-chromgp preprocess -c configs/<dataset>/<model>.yaml   # mcool → standardized arrays
-chromgp train      -c configs/<dataset>/<model>.yaml   # fit GP, save checkpoint + ELBO
-chromgp analyze    -c configs/<dataset>/<model>.yaml   # metrics, inferred 3D coords
-chromgp figures    -c configs/<dataset>/<model>.yaml   # publication figures
+chromgp generate   -c configs/<dataset>/<region>/general.yaml   # expand to per-model configs
+chromgp preprocess -c configs/<dataset>/<region>/<model>.yaml   # mcool → standardized arrays
+chromgp train      -c configs/<dataset>/<region>/<model>.yaml   # fit GP, save checkpoint + ELBO
+chromgp analyze    -c configs/<dataset>/<region>/<model>.yaml   # metrics, inferred 3D coords
+chromgp figures    -c configs/<dataset>/<region>/<model>.yaml   # publication figures
 ```
+
+`<dataset>` is the 4DN accession (Hi-C) or `chipseq_<cell>` (ChIP-seq);
+`<region>` is the chromosome or resolution suffix (`chr1`–`chr22`, `10k`).
+This mirrors `outputs/<dataset>/<region>/<model>/…`.
 
 **Models supported:** `SVGP`, `MGGP_SVGP`, `LCGP`, `MGGP_LCGP`. No PNMF — ChromGP infers 3D coordinates whose pairwise distances explain the observed contact matrix; that's a different problem from non-negative matrix factorization into latent factor loadings.
 
@@ -225,11 +229,11 @@ Field categories (for `generate` filtering): `COMMON_MODEL_FIELDS`, `SPATIAL_FIE
 
 ### Stage 1: Generate command + Config dataclass ⬜
 
-**Goal:** `chromgp generate -c configs/4DNFIXP4QG5B/general.yaml` writes the four model-specific YAMLs.
+**Goal:** `chromgp generate -c configs/4DNFIXP4QG5B/chr14/general.yaml` writes the four model-specific YAMLs.
 
 - [ ] `chromgp/config.py` — `Config` dataclass with `name`, `seed`, `dataset`, `preprocessing`, `model`, `training`, `output_dir`. `Config.from_yaml(path)` and `to_yaml(path)`.
 - [ ] `chromgp/generate.py` — `MODEL_VARIANTS` list; field-filtering tables; entry point that reads `general.yaml` and writes per-model variants into the same dir.
-- [ ] `configs/4DNFIXP4QG5B/general.yaml` — first real example using the lab's existing mcool. Single chromosome (`chr14`) at 25 kb is a reasonable starter.
+- [ ] `configs/4DNFIXP4QG5B/chr14/general.yaml` — first real example using the lab's existing mcool. Single chromosome (`chr14`) at 25 kb is a reasonable starter.
 - [ ] `chromgp/commands/generate.py` — invokes `chromgp.generate`.
 - [ ] Verify generated `svgp.yaml`, `mggp_svgp.yaml`, `lcgp.yaml`, `mggp_lcgp.yaml` round-trip through `Config.from_yaml`.
 

@@ -37,7 +37,7 @@ def generate(config):
 
     \b
     Example:
-        chromgp generate -c configs/4DNFIXP4QG5B/general.yaml
+        chromgp generate -c configs/4DNFIXP4QG5B/chr14/general.yaml
     """
     from .generate import generate_configs
 
@@ -101,9 +101,9 @@ def run(stages, config, resume, video, animation):
 
     \b
     EXAMPLES:
-        chromgp run preprocess train -c configs/4DNFIXP4QG5B/svgp.yaml
-        chromgp run train -c configs/4DNFIXP4QG5B/svgp.yaml --resume
-        chromgp run preprocess train -c configs/4DNFIXP4QG5B/svgp.yaml --video
+        chromgp run preprocess train -c configs/4DNFIXP4QG5B/chr14/svgp.yaml
+        chromgp run train -c configs/4DNFIXP4QG5B/chr14/svgp.yaml --resume
+        chromgp run preprocess train -c configs/4DNFIXP4QG5B/chr14/svgp.yaml --video
     """
     stages = [s.lower() for s in stages]
 

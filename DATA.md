@@ -98,8 +98,14 @@ the same publication but our Hi-C runs don't yet include the X chromosomes.
 
 ## Configs
 
-Config YAMLs live under `configs/4DNFIXP4QG5B/`, `configs/4DNFIXP4QG5B_10k/`, `configs/4DNFIXP4QG5B_chr19/`, `configs/4DNFIXP4QG5B_chr9/`.
-Each directory contains per-model configs (`general.yaml`, `svgp.yaml`, `lcgp.yaml`, `mggp_svgp.yaml`, `mggp_lcgp.yaml`).
+Config YAMLs are organized as `configs/<dataset>/<region>/<model>.yaml`,
+mirroring the `outputs/<dataset>/<region>/<model>/…` layout — e.g.
+`configs/4DNFIXP4QG5B/chr19/general.yaml`, `configs/4DNFIXP4QG5B/10k/general.yaml`,
+`configs/chipseq_IMR90/chr21/general.yaml`. Each region directory holds the
+tracked `general.yaml` plus the four model-specific YAMLs
+(`svgp.yaml`, `mggp_svgp.yaml`, `lcgp.yaml`, `mggp_lcgp.yaml`) that
+`chromgp generate` emits from `general.yaml`. Only `general.yaml` is
+checked in; the model variants are gitignored.
 
 The `chromhmm_bed` field should point to the Roadmap BedGraph for the matching cell line.
 For GM12878 (4DNFIXP4QG5B): `chromhmm_bed: /gladstone/engelhardt/lab/lchumpitaz/datasets/chromhmm/E116_15_coreMarks_hg38lift_mnemonics.bed`

@@ -15,7 +15,7 @@ END="${3:?}"
 export CUDA_VISIBLE_DEVICES="$GPU_ID"
 
 CONDA_ENV="chromgp"
-CONFIG_BASE="/gladstone/engelhardt/home/lchumpitaz/gitclones/ChromGP/configs/4DNFIXP4QG5B_chr"
+CONFIG_BASE="/gladstone/engelhardt/home/lchumpitaz/gitclones/ChromGP/configs/4DNFIXP4QG5B/chr"
 
 eval "$(conda shell.bash hook)"
 conda activate "$CONDA_ENV"
