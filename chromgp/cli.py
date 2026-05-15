@@ -100,6 +100,19 @@ def baseline_poisms(config, df, maxepoch):
     poisms_cmd.run(config, df=df, maxepoch=maxepoch)
 
 
+@baseline.command("figures")
+@click.option("--dataset-dir", type=click.Path(exists=True), required=True,
+              help="e.g. outputs/4DNFIJTOIGOI")
+@click.option("--regions", default="chr20,chr21,chr22", show_default=True)
+@click.option("--methods", default="svgp,poisms", show_default=True)
+@click.option("--out-dir", type=click.Path(), required=True,
+              help="Directory for output PNGs")
+def baseline_figures(dataset_dir, regions, methods, out_dir):
+    """Bar + scatter-grid comparison figures across methods × chromosomes."""
+    from .baselines.figures import run as fig_run
+    fig_run(dataset_dir, regions, methods, out_dir)
+
+
 @baseline.command("summary")
 @click.option("--dataset-dir", type=click.Path(exists=True), required=True,
               help="e.g. outputs/4DNFIJTOIGOI")
