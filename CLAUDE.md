@@ -157,6 +157,15 @@ The `synthetic_helix` (spiral-style) config happened to work with σ_out trainab
 
 **Never commit or push unless explicitly told to.** Make code changes freely, but always wait for the user to say "commit" or "push" before running any `git commit` or `git push` command.
 
+## Outputs / artifact safety
+
+`outputs/` is gitignored, so anything overwritten is **gone**. Training results are slow and expensive to regenerate, and "headline" numbers reported in chat/figures/manuscript are not durable until they're also on disk under a unique `region_slug` path. To avoid repeating the May 2026 incident where 100 kb runs clobbered 25 kb chr20/21 artifacts (because both shared `region_slug = chr20`):
+
+1. **Before any training / preprocess / baseline run, `ls outputs/<dataset>/<region_slug>/` and confirm the target is what you intend.** If anything non-trivial already lives there, ask the user before proceeding.
+2. **Snapshot irreplaceable artifacts first.** Before any operation that might overwrite an existing `outputs/<dataset>/<region_slug>/<method>/analysis.json` or `positions.npy`, copy them to `outputs/<dataset>/<region_slug>/_snapshots/<YYYY-MM-DD>/<method>/`. Cheap insurance against the chr20-clobber pattern.
+3. **Distinct resolutions / variants must use distinct `region_slug`s.** Configs at different resolutions of the same chromosome (e.g. chr20 25 kb vs chr20 100 kb) must set `preprocessing.region_slug` explicitly (e.g. `chr20_100k`) — see commit 68cb51d. Don't rely on `preprocessing.region` alone to disambiguate.
+4. **Never `rm` / `mv` under `outputs/` without asking**, even if it looks like stale junk — it may be the only copy of a reported result.
+
 ## Tmux conventions
 
 When launching a long-running command (training, preprocessing, etc.):
