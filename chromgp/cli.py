@@ -100,6 +100,18 @@ def baseline_poisms(config, df, maxepoch):
     poisms_cmd.run(config, df=df, maxepoch=maxepoch)
 
 
+@baseline.command("pastis")
+@click.option("--config", "-c", required=True, type=click.Path(exists=True), help="Path to config YAML")
+@click.option("--alpha", type=float, default=-3.0, show_default=True,
+              help="Power-law decay exponent (Pastis paper default -3.0)")
+@click.option("--maxiter", type=int, default=100, show_default=True,
+              help="Pastis L-BFGS-B iteration cap")
+def baseline_pastis(config, alpha, maxiter):
+    """Fit Pastis (Varoquaux 2014) on the Hi-C matrix and FISH-validate."""
+    from .baselines import pastis as pastis_cmd
+    pastis_cmd.run(config, alpha=alpha, max_iter=maxiter)
+
+
 @baseline.command("figures")
 @click.option("--dataset-dir", type=click.Path(exists=True), required=True,
               help="e.g. outputs/4DNFIJTOIGOI")
