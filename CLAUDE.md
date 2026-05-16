@@ -4,7 +4,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-ChromGP is a research codebase for inferring 3D chromatin structure from Hi-C-style contact / distance data using deep Gaussian Processes built on top of the sibling **GPzoo** package (`../GPzoo`, importable as `gpzoo`). The repo itself is small library code + a large set of experimental Jupyter notebooks; almost all driver code lives in the notebooks.
+ChromGP is a research codebase for inferring 3D chromatin structure from Hi-C-style contact / distance data using deep Gaussian Processes built on top of the sibling **GPzoo** package (`../GPzoo`, importable as `gpzoo`). The repo itself is small library code + a large set of experimental Jupyter notebooks; almost all driver code lives in the notebooks. A CLI pipeline (`chromgp ...`) wraps the library for reproducible publication-style runs.
+
+## Pipeline & layout (current state)
+
+```
+chromgp generate   -c configs/<dataset>/<region>/general.yaml   # expand to per-model configs
+chromgp preprocess -c configs/<dataset>/<region>/<model>.yaml   # mcool → standardized arrays
+chromgp train      -c …                                          # fit GP, save checkpoint + ELBO
+chromgp analyze    -c …                                          # SCC, FISH validation, posteriors
+chromgp figures    -c …                                          # reconstruction, ELBO, FISH plots
+chromgp baseline {poisms,summary,figures}                        # head-to-head with PoisMS (R)
+```
+
+`configs/<dataset>/<region>/` mirrors `outputs/<dataset>/<region>/<model>/`. Only `general.yaml` is tracked; per-model variants (`svgp.yaml`, `mggp_svgp.yaml`, `lcgp.yaml`, `mggp_lcgp.yaml`) are produced by `chromgp generate` and gitignored. Datasets are 4DN accessions (Hi-C) or `chipseq_<cell>` (ChIP-seq); regions are `chr1`–`chr22`, `chrN_100k`, etc.
+
+## FISH validation (Wang 2016)
+
+External validation lives in `chromgp/datasets/fish.py` + `chromgp/analysis.py::fish_validation`. Per `docs/fish.md`: each FISH probe spans multiple Hi-C bins, so the ChromGP posterior mean is **probe-footprint aggregated** before computing pairwise distances (matches PoisMS / DBMS convention). Headline metric is Spearman ρ on pairwise probe distances. Opt-in via a `preprocessing.fish:` block in `general.yaml`. Wang 2016 IMR90 CSVs for chr20/21/22 are at `/gladstone/engelhardt/lab/lchumpitaz/datasets/fish/wang2016/`.
+
+## Baselines (PoisMS)
+
+`chromgp/baselines/poisms.py` shells out to `poisms_fit.R` via `Rscript` from a separate conda env `r-poisms` (at `~/miniconda3/envs/r-poisms`); R packages live in user lib `~/R_libs/r-poisms` (PoisMS 1.1 installed from GitHub). Baselines consume **raw integer counts** (via `cooler.matrix(balance=False)`) while ChromGP consumes **ICE-balanced** contacts — this is by design (see Discussion §4.3 in the overleaf-chromgp manuscript: bias-corrected inputs + Gaussian likelihood vs raw counts + Poisson likelihood). All baselines write outputs to `outputs/<dataset>/<region>/<method>/` mirroring the ChromGP layout, so the FISH validation flows are identical.
+
+## Headline state of work
+
+- ChromGP (SVGP, 25 kb) FISH Spearman: chr20 +0.84, chr21 +0.79, chr22 +0.59.
+- PoisMS (R, df=5, 25 kb) FISH Spearman: chr20 +0.53, chr21 +0.57, chr22 +0.46.
+- Comparison figures: `outputs/4DNFIJTOIGOI/_baseline_comparison/{fish_spearman_bar,fish_log_pearson_bar,fish_scatter_grid}.png`.
+- **Pending:** 100 kb head-to-head (configs at `configs/4DNFIJTOIGOI/{chr20_100k,chr21_100k,chr22_100k}/`); Pastis as a third baseline column; MGGP_SVGP-on-FISH; an `SCC: nan` bug in `analyze.py` for IMR90 chr21.
+- Manuscript repo: `~/gitclones/overleaf-chromgp` on `master` — FISH/ICE-bias edits + PoisMS-comparison edits drafted (handed to codex).
+
+## Quick health-check
+
+```bash
+cd ~/gitclones/ChromGP && git status && git log --oneline -3
+conda activate chromgp && python -m chromgp --help
+python -m chromgp baseline summary \
+  --dataset-dir outputs/4DNFIJTOIGOI \
+  --regions chr20,chr21,chr22 --methods svgp,poisms
+```
+
 
 ## Install & dependencies
 

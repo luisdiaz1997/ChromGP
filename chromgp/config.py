@@ -98,6 +98,20 @@ class Config:
         return self.model.get("prior", "SVGP") == "LCGP"
 
     @property
+    def region_slug(self) -> str:
+        """Slug used for the output subdirectory under ``output_dir``.
+
+        Defaults to ``preprocessing.region`` with ``:`` → ``_`` substitution.
+        Overridable via ``preprocessing.region_slug`` so resolution variants
+        (e.g. ``chr20_100k``) can route output to a separate directory while
+        still loading ``chr20`` from the mcool.
+        """
+        override = self.preprocessing.get("region_slug")
+        if override:
+            return str(override)
+        return self.preprocessing.get("region", "unknown").replace(":", "_")
+
+    @property
     def model_name(self) -> str:
         """Return model directory name based on groups/local config.
 

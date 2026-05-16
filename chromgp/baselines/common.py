@@ -47,7 +47,7 @@ def load_raw_counts(config: Config) -> tuple[np.ndarray, np.ndarray, np.ndarray]
     raw = clr.matrix(balance=False).fetch(region)
     raw = np.asarray(raw, dtype=np.int64)
 
-    region_dir = Path(config.output_dir) / region.replace(":", "_")
+    region_dir = Path(config.output_dir) / config.region_slug
     data = load_preprocessed(region_dir)
     valid_mask = data.valid_mask.cpu().numpy() if data.valid_mask is not None else np.ones(raw.shape[0], dtype=bool)
 
@@ -130,7 +130,7 @@ def save_baseline_outputs(
     Returns:
         The output directory path.
     """
-    region_slug = config.preprocessing.get("region", "unknown").replace(":", "_")
+    region_slug = config.region_slug
     out_dir = Path(config.output_dir) / region_slug / method
     out_dir.mkdir(parents=True, exist_ok=True)
 

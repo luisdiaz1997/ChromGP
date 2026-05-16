@@ -118,7 +118,7 @@ def run(config_path: str):
 
     # Create output directory for preprocessed data
     # Output path: outputs/<dataset>/<region_slug>/preprocessed/  (shared across models)
-    region_slug = config.preprocessing.get('region', 'unknown').replace(':', '_')
+    region_slug = config.region_slug
     output_dir = Path(config.output_dir) / region_slug / "preprocessed"
     output_dir.mkdir(parents=True, exist_ok=True)
 

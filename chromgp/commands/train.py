@@ -261,7 +261,7 @@ def run(config_path: str, resume: bool = False, video: bool = False):
     config = Config.from_yaml(config_path)
 
     # --- Paths ---
-    region_slug = config.preprocessing.get("region", "unknown").replace(":", "_")
+    region_slug = config.region_slug
     model_name = config.model_name
     region_dir = Path(config.output_dir) / region_slug
     output_dir = region_dir / model_name          # model-specific outputs
