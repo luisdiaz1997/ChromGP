@@ -85,12 +85,14 @@ def fit_pastis(
         elapsed = time.time() - t0
 
         td_path = Path(td)
-        converged_path = td_path / "struct_inferred.000.coords"
-        nonconverged_path = td_path / "struct_nonconverged.000.coords"
-        if converged_path.exists():
-            coord_path = converged_path
-        elif nonconverged_path.exists():
-            coord_path = nonconverged_path
+        # Pastis names coord files struct_{inferred,nonconverged}.{seed:03d}.coords,
+        # so we glob rather than hardcode the suffix.
+        converged_files = sorted(td_path.glob("struct_inferred.*.coords"))
+        nonconverged_files = sorted(td_path.glob("struct_nonconverged.*.coords"))
+        if converged_files:
+            coord_path = converged_files[0]
+        elif nonconverged_files:
+            coord_path = nonconverged_files[0]
         else:
             available = sorted(p.name for p in td_path.iterdir())
             raise RuntimeError(
