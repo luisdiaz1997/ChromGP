@@ -119,10 +119,12 @@ def baseline_pastis(config, alpha, maxiter):
 @click.option("--methods", default="svgp,poisms", show_default=True)
 @click.option("--out-dir", type=click.Path(), required=True,
               help="Directory for output PNGs")
-def baseline_figures(dataset_dir, regions, methods, out_dir):
+@click.option("--bootstrap-ci/--no-bootstrap-ci", default=False, show_default=True,
+              help="Draw 95% bootstrap-CI whiskers on the Spearman bar")
+def baseline_figures(dataset_dir, regions, methods, out_dir, bootstrap_ci):
     """Bar + scatter-grid comparison figures across methods × chromosomes."""
     from .baselines.figures import run as fig_run
-    fig_run(dataset_dir, regions, methods, out_dir)
+    fig_run(dataset_dir, regions, methods, out_dir, bootstrap_ci=bootstrap_ci)
 
 
 @baseline.command("summary")
